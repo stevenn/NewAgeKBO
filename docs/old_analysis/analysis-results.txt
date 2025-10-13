@@ -1,0 +1,257 @@
+=== DENOMINATION PATTERNS ===
+
+--- Denomination types by language ---
+| TypeOfDenomination | Language | count  |
+|--------------------|---------:|-------:|
+| 001                | 0        | 820989 |
+| 001                | 1        | 413491 |
+| 001                | 2        | 694839 |
+| 001                | 3        | 8445   |
+| 001                | 4        | 4395   |
+| 002                | 0        | 5464   |
+| 002                | 1        | 44543  |
+| 002                | 2        | 47777  |
+| 002                | 3        | 430    |
+| 002                | 4        | 291    |
+| 003                | 0        | 12983  |
+| 003                | 1        | 484386 |
+| 003                | 2        | 750835 |
+| 003                | 3        | 6330   |
+| 003                | 4        | 14508  |
+| 004                | 0        | 10     |
+| 004                | 1        | 67     |
+| 004                | 2        | 87     |
+| 004                | 3        | 8      |
+| 004                | 4        | 29     |
+Run Time (s): real 0.111 user 0.535782 sys 0.038645
+
+--- Top 10 enterprises with most denominations ---
+| EntityNumber  | denomination_count |
+|---------------|-------------------:|
+| 0833.917.314  | 10                 |
+| 0244.640.631  | 9                  |
+| 0403.552.563  | 8                  |
+| 0458.859.389  | 8                  |
+| 0846.992.518  | 8                  |
+| 0923.971.421  | 8                  |
+| 0448.723.978  | 8                  |
+| 0671.516.647  | 7                  |
+| 2.186.128.392 | 7                  |
+| 2.200.154.691 | 7                  |
+Run Time (s): real 0.119 user 0.758753 sys 0.064414
+
+--- Sample denominations for one enterprise ---
+| EntityNumber | Language | TypeOfDenomination |             Denomination             |
+|--------------|---------:|--------------------|--------------------------------------|
+| 0200.065.765 | 2        | 001                | Intergemeentelijke Vereniging Veneco |
+| 0200.065.765 | 2        | 002                | Veneco                               |
+Run Time (s): real 0.093 user 0.596285 sys 0.023304
+
+=== ADDRESS PATTERNS ===
+
+--- Address types distribution ---
+| TypeOfAddress |  count  |
+|---------------|--------:|
+| BAET          | 1672490 |
+| REGO          | 1161940 |
+| ABBR          | 7325    |
+Run Time (s): real 0.177 user 1.060678 sys 0.062778
+
+--- Top 10 enterprises with most addresses ---
+| EntityNumber | address_count |
+|--------------|--------------:|
+| 0445.547.526 | 1             |
+| 0445.564.451 | 1             |
+| 0445.721.334 | 1             |
+| 0445.724.304 | 1             |
+| 0445.725.094 | 1             |
+| 0445.767.755 | 1             |
+| 0445.768.844 | 1             |
+| 0445.779.534 | 1             |
+| 0445.788.046 | 1             |
+| 0445.792.006 | 1             |
+Run Time (s): real 0.197 user 1.333228 sys 0.083838
+
+=== ACTIVITY PATTERNS ===
+
+--- Activity classification distribution ---
+| Classification |  count   |
+|----------------|---------:|
+| MAIN           | 29221690 |
+| SECO           | 7079688  |
+| ANCI           | 4990     |
+Run Time (s): real 0.825 user 6.452295 sys 0.343848
+
+--- NACE version distribution ---
+| NaceVersion |  count   |
+|------------:|---------:|
+| 2025        | 17328420 |
+| 2008        | 16647716 |
+| 2003        | 2330232  |
+Run Time (s): real 0.734 user 6.350581 sys 0.230267
+
+--- ActivityGroup distribution ---
+| ActivityGroup |  count   |
+|---------------|---------:|
+| 003           | 28628062 |
+| 001           | 6440792  |
+| 006           | 1202740  |
+| 007           | 25360    |
+| 005           | 6925     |
+| 004           | 2487     |
+| 002           | 2        |
+Run Time (s): real 0.758 user 6.516719 sys 0.227081
+
+--- Top 10 enterprises with most MAIN activities ---
+| EntityNumber  | main_activity_count |
+|---------------|--------------------:|
+| 2.175.653.085 | 822                 |
+| 2.346.846.704 | 783                 |
+| 2.180.993.728 | 760                 |
+| 2.170.147.445 | 745                 |
+| 2.036.350.890 | 733                 |
+| 2.214.510.691 | 699                 |
+| 2.290.736.855 | 696                 |
+| 2.290.724.878 | 683                 |
+| 2.304.125.429 | 682                 |
+| 2.169.907.420 | 643                 |
+Run Time (s): real 0.858 user 7.408149 sys 0.274435
+
+--- Sample activities for one enterprise ---
+| EntityNumber | ActivityGroup | NaceVersion | NaceCode | Classification |
+|--------------|---------------|------------:|----------|----------------|
+| 0200.065.765 | 001           | 2003        | 70111    | MAIN           |
+| 0200.065.765 | 006           | 2008        | 84130    | MAIN           |
+| 0200.065.765 | 001           | 2008        | 41101    | MAIN           |
+| 0200.065.765 | 006           | 2025        | 84130    | MAIN           |
+| 0200.065.765 | 001           | 2025        | 68121    | MAIN           |
+Run Time (s): real 0.864 user 7.506077 sys 0.232658
+
+=== CODE TABLE ANALYSIS ===
+
+--- Categories in code table ---
+|      Category      | unique_codes | total_rows |
+|--------------------|-------------:|-----------:|
+| Nace2003           | 3838         | 7676       |
+| Nace2008           | 3324         | 6648       |
+| Nace2025           | 3276         | 6552       |
+| JuridicalForm      | 146          | 438        |
+| JuridicalSituation | 40           | 120        |
+| ActivityGroup      | 7            | 14         |
+| Language           | 5            | 10         |
+| TypeOfAddress      | 4            | 8          |
+| TypeOfDenomination | 4            | 8          |
+| ContactType        | 3            | 6          |
+| EntityContact      | 3            | 6          |
+| TypeOfEnterprise   | 3            | 6          |
+| Classification     | 3            | 6          |
+| Status             | 1            | 2          |
+Run Time (s): real 0.022 user 0.022174 sys 0.004471
+
+--- TypeOfDenomination codes ---
+| Code | Language |          Description           |
+|------|----------|--------------------------------|
+| 001  | FR       | Dénomination                   |
+| 001  | NL       | Naam                           |
+| 002  | FR       | Abréviation                    |
+| 002  | NL       | Afkorting                      |
+| 003  | FR       | Dénomination commerciale       |
+| 003  | NL       | Commerciële naam               |
+| 004  | FR       |  Dénomination de la succursale |
+| 004  | NL       | Naam van het bijkantoor        |
+Run Time (s): real 0.018 user 0.018070 sys 0.000536
+
+--- TypeOfAddress codes ---
+| Code | Language |              Description              |
+|------|----------|---------------------------------------|
+| ABBR | FR       | Succursale                            |
+| ABBR | NL       | Bijkantoor                            |
+| BAET | FR       | Unité d'établissement                 |
+| BAET | NL       | Vestigingseenheid                     |
+| OBAD | FR       | Première unité d'établissement active |
+| OBAD | NL       | Oudste actieve vestigingseenheid      |
+| REGO | FR       | Siège                                 |
+| REGO | NL       | Zetel                                 |
+Run Time (s): real 0.021 user 0.019863 sys 0.000976
+
+--- ActivityGroup codes (sample) ---
+| Code | Language |                Description                 |
+|------|----------|--------------------------------------------|
+| 001  | FR       | Activités TVA                              |
+| 001  | NL       | BTW-activiteiten                           |
+| 002  | FR       | Activités EDRL                             |
+| 002  | NL       | EDRL-activiteiten                          |
+| 003  | FR       | Activités                                  |
+| 003  | NL       | Activiteiten                               |
+| 004  | FR       | Activités de la fonction publique fédérale |
+| 004  | NL       | Activiteiten federaal openbaar ambt        |
+| 005  | FR       | Activités ONSSAPL                          |
+| 005  | NL       | RSZPPO-activiteiten                        |
+| 006  | FR       | Activités ONSS                             |
+| 006  | NL       | RSZ-activiteiten                           |
+| 007  | FR       | Activités de l'enseignement subventionné   |
+| 007  | NL       | Activiteiten gesubsideerd onderwijs        |
+Run Time (s): real 0.018 user 0.017525 sys 0.000399
+
+=== RELATIONSHIP VALIDATION ===
+
+--- Do all enterprises have at least one address? ---
+| enterprises_total | enterprises_with_address | enterprises_without_address |
+|------------------:|-------------------------:|----------------------------:|
+| 1938238           | 1161940                  | 776298                      |
+Run Time (s): real 0.331 user 2.090570 sys 0.141306
+
+--- Do all enterprises have at least one denomination? ---
+| enterprises_total | enterprises_with_name | enterprises_without_name |
+|------------------:|----------------------:|-------------------------:|
+| 1938238           | 1938238               | 0                        |
+Run Time (s): real 0.242 user 1.565452 sys 0.090131
+
+--- Do all enterprises have at least one MAIN activity? ---
+| enterprises_total | enterprises_with_main_activity | enterprises_without_main_activity |
+|------------------:|-------------------------------:|----------------------------------:|
+| 1938238           | 1253298                        | 684940                            |
+Run Time (s): real 0.967 user 8.140343 sys 0.296506
+
+=== DAILY UPDATE ANALYSIS (extract 140 → 147) ===
+
+--- Changes by entity type ---
+|  entity_type  | delete_count | insert_count |
+|---------------|-------------:|-------------:|
+| enterprise    | 161          | 27           |
+| activity      | 41           | 424          |
+| address       | 52           | 67           |
+| denomination  | 171          | 52           |
+| establishment | 13           | 21           |
+| contact       | 23           | 39           |
+Run Time (s): real 0.020 user 0.013013 sys 0.008132
+
+--- Total changes ---
+| total_changes | total_deletes | total_inserts |
+|--------------:|--------------:|--------------:|
+| 1091          | 461           | 630           |
+Run Time (s): real 0.017 user 0.012578 sys 0.005095
+
+--- Days between extracts ---
+| full_snapshot | update_snapshot | days_between |
+|---------------|-----------------|-------------:|
+| 04-10-2025    | 11-10-2025      | 7            |
+Run Time (s): real 0.002 user 0.001227 sys 0.001303
+
+=== STORAGE ESTIMATION ===
+
+--- Average activities per enterprise ---
+| avg_activities_per_enterprise | min_activities | max_activities | median_activities |
+|------------------------------:|---------------:|---------------:|------------------:|
+| 12.409149852312584            | 1              | 957            | 6.0               |
+Run Time (s): real 0.836 user 7.035325 sys 0.282319
+
+--- Unique NACE codes ---
+| NaceVersion | unique_nace_codes |
+|------------:|------------------:|
+| 2003        | 2711              |
+| 2008        | 2326              |
+| 2025        | 2228              |
+Run Time (s): real 0.798 user 6.858205 sys 0.240503
+
+Analysis complete!

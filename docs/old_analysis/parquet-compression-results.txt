@@ -1,0 +1,82 @@
+=== Parquet Compression Test ===
+
+Input file: sampledata/KboOpenData_0140_2025_10_05_Full/activity.csv
+Original CSV size:
+1.5G
+
+Converting to Parquet with different compression methods...
+
+[1/4] Uncompressed Parquet...
+Run Time (s): real 1.561 user 11.240530 sys 0.745605
+
+[2/4] Snappy compression...
+Run Time (s): real 1.616 user 11.459536 sys 0.633175
+
+[3/4] ZSTD compression...
+Run Time (s): real 1.652 user 11.884792 sys 0.626289
+
+[4/4] GZIP compression...
+Run Time (s): real 2.400 user 18.688901 sys 0.613841
+
+=== Compression Results ===
+
+File sizes:
+-rw-r--r--@ 1 stevenn  staff    73M Oct 13 19:53 activity_gzip.parquet
+-rw-r--r--@ 1 stevenn  staff   114M Oct 13 19:53 activity_snappy.parquet
+-rw-r--r--@ 1 stevenn  staff   536M Oct 13 19:53 activity_uncompressed.parquet
+-rw-r--r--@ 1 stevenn  staff    71M Oct 13 19:53 activity_zstd.parquet
+
+Compression ratios (vs original CSV):
+activity_gzip.parquet: 21.23x compression (100% savings)
+activity_snappy.parquet: 13.55x compression (100% savings)
+activity_uncompressed.parquet: 2.87x compression (70.0% savings)
+activity_zstd.parquet: 21.61x compression (100% savings)
+
+=== Read Performance Test ===
+
+Reading each Parquet file and counting rows...
+
+Reading activity_gzip.parquet:
+┌───────────┐
+│ row_count │
+│   int64   │
+├───────────┤
+│  36306368 │
+└───────────┘
+Run Time (s): real 0.002 user 0.000921 sys 0.000359
+
+Reading activity_snappy.parquet:
+┌───────────┐
+│ row_count │
+│   int64   │
+├───────────┤
+│  36306368 │
+└───────────┘
+Run Time (s): real 0.001 user 0.000907 sys 0.000277
+
+Reading activity_uncompressed.parquet:
+┌───────────┐
+│ row_count │
+│   int64   │
+├───────────┤
+│  36306368 │
+└───────────┘
+Run Time (s): real 0.001 user 0.000925 sys 0.000296
+
+Reading activity_zstd.parquet:
+┌───────────┐
+│ row_count │
+│   int64   │
+├───────────┤
+│  36306368 │
+└───────────┘
+Run Time (s): real 0.001 user 0.000915 sys 0.000278
+
+=== Test Complete ===
+
+Recommendation:
+- Use ZSTD for storage (best compression)
+- Use Snappy for temporary/intermediate files (fast)
+
+
+Test files kept in parquet-test/
