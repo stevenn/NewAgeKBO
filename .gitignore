@@ -55,3 +55,4 @@ parquet-test/
 # OS
 .DS_Store
 Thumbs.db
+specs/3rdpartyapi.json

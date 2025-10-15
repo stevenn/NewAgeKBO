@@ -37,48 +37,212 @@
 
 ---
 
+## Data Scope & Limitations
+
+### What's Included in KBO Open Data
+
+The schema below covers **all 9 CSV files** available in the KBO Open Data dataset:
+
+✅ **enterprise.csv** → Core enterprise information
+✅ **establishment.csv** → Establishment units
+✅ **denomination.csv** → Business names (all languages & types)
+✅ **address.csv** → Addresses (legal persons + establishments)
+✅ **activity.csv** → Economic activities (NACE codes)
+✅ **contact.csv** → Contact details (phone, email, web)
+✅ **branch.csv** → Branch offices of foreign entities
+✅ **code.csv** → Lookup tables (multilingual descriptions)
+✅ **meta.csv** → Extract metadata (snapshot date, version)
+
+### What's NOT in KBO Open Data
+
+Several data types that third-party services (like kbodata.app API) provide are **sourced from external systems** and are NOT available in the KBO Open Data:
+
+❌ **Financial data** - NOT in KBO Open Data
+- Paid-in capital amounts
+- Fiscal year start/end dates
+- Annual assembly dates
+- **Source**: Belgian National Bank, Official Gazette publications
+
+❌ **NSSO/RSZ data** - NOT in KBO Open Data
+- Employer numbers (RSZ-nummer, ONSS number)
+- Employee count ranges
+- Sector codes
+- **Source**: NSSO (National Social Security Office) database - separate system
+
+❌ **Board members & roles** - NOT in KBO Open Data
+- Directors, managers, mandates
+- Function titles and dates
+- Appointment/resignation dates
+- **Source**: Official Gazette (Moniteur Belge/Belgisch Staatsblad), notarial acts
+
+❌ **Real-time VAT validation** - NOT in KBO Open Data
+- EU VIES VAT number validation
+- **Source**: European Commission VIES service
+
+❌ **Historical financial statements** - NOT in KBO Open Data
+- Annual accounts, balance sheets
+- **Source**: National Bank of Belgium
+
+### Schema Design Philosophy
+
+Our schema is designed to:
+1. **Fully utilize** all data available in KBO Open Data (9 CSV files)
+2. **Support temporal tracking** of changes over time (monthly granularity)
+3. **Optimize storage** via link tables and Parquet compression
+4. **Enable extensibility** for future external data integrations
+
+---
+
+## Multi-Language Strategy
+
+### Language Code Mapping (CRITICAL)
+
+**KBO Open Data uses these language codes:**
+
+| Code | Language | CSV Field Value |
+|------|----------|-----------------|
+| 0 | Unknown | `"0"` |
+| 1 | French  | `"1"` |
+| 2 | Dutch   | `"2"` |
+| 3 | German  | `"3"` |
+| 4 | English | `"4"` |
+
+**⚠️ Common Mistake:** Do NOT assume 0=FR, 1=DE. The actual mapping is 0=unknown, 1=FR, 2=NL, 3=DE, 4=EN.
+
+### Multi-Language Data Patterns
+
+**1. Denominations (Enterprise/Establishment Names)**
+- Stored in separate rows per language
+- Language code in `Language` field (0-4)
+- **Strategy**: Store ALL in `denominations` table, denormalize primary name (NL/FR/DE) into enterprises table
+
+**2. Addresses**
+- Multi-language fields within same row: `CountryNL`, `CountryFR`, `MunicipalityNL`, `MunicipalityFR`, etc.
+- **Strategy**: Store all language variants in columns
+
+**3. Code Descriptions**
+- Stored in `code.csv` with one row per (Category, Code, Language) combination
+- All descriptions available in NL, FR, DE, EN (sometimes only NL/FR)
+- **Strategy**: Store in `codes` table, JOIN at query time based on user's language preference
+
+### Implementation Patterns
+
+**Pattern 1: Store Codes, JOIN for Descriptions**
+```sql
+-- Enterprises table stores ONLY codes
+enterprises.juridical_form = "030"  -- code
+
+-- codes table has descriptions
+codes WHERE category='JuridicalForm' AND code='030' AND language='NL'
+  → "Buitenlandse entiteit"
+codes WHERE category='JuridicalForm' AND code='030' AND language='FR'
+  → "Entité étrangère"
+
+-- Runtime JOIN based on user language
+SELECT e.*, c.description AS juridical_form_desc
+FROM enterprises e
+LEFT JOIN codes c
+  ON c.category = 'JuridicalForm'
+  AND c.code = e.juridical_form
+  AND c.language = :user_language
+```
+
+**Benefits:**
+- Flexible: User can switch language without data changes
+- Storage efficient: No duplicate descriptions
+- Complete: All 4 languages supported (NL/FR/DE/EN)
+
+**Pattern 2: Denormalize Primary Name Only**
+```sql
+-- Enterprises table stores top 3 languages
+enterprises.primary_name_nl = "Intergemeentelijke Vereniging Veneco"
+enterprises.primary_name_fr = NULL  -- if not available
+enterprises.primary_name_de = NULL  -- for German-speaking regions
+
+-- Fallback logic in queries
+COALESCE(primary_name_nl, primary_name_fr, primary_name_de) AS name
+```
+
+**Pattern 3: Address Multi-Language Columns**
+```sql
+-- Addresses table has separate columns per language
+addresses.street_nl = "Panhuisstraat"
+addresses.street_fr = "Panhuisstraat"  -- often same for Flemish cities
+addresses.municipality_nl = "Destelbergen"
+addresses.municipality_fr = "Destelbergen"
+```
+
+### Language Fallback Strategy
+
+**Recommended logic for displaying enterprise information:**
+
+```typescript
+function getEnterpriseName(enterprise: Enterprise, userLang: 'NL' | 'FR' | 'DE' | 'EN'): string {
+  // Priority 1: User's preferred language
+  if (userLang === 'NL' && enterprise.primary_name_nl) return enterprise.primary_name_nl;
+  if (userLang === 'FR' && enterprise.primary_name_fr) return enterprise.primary_name_fr;
+  if (userLang === 'DE' && enterprise.primary_name_de) return enterprise.primary_name_de;
+
+  // Priority 2: Fallback to Dutch (most common)
+  if (enterprise.primary_name_nl) return enterprise.primary_name_nl;
+
+  // Priority 3: Fallback to French
+  if (enterprise.primary_name_fr) return enterprise.primary_name_fr;
+
+  // Priority 4: Any available
+  return enterprise.primary_name_de || '[No name available]';
+}
+```
+
+### Code Descriptions Coverage
+
+**All code categories support 4 languages:**
+- JuridicalForm: NL ✓ FR ✓ DE ✓ EN ✗ (usually only NL/FR/DE)
+- JuridicalSituation: NL ✓ FR ✓ DE ✓ EN ✗
+- ActivityGroup: NL ✓ FR ✓ DE ✗ EN ✗ (usually only NL/FR)
+- TypeOfAddress: NL ✓ FR ✓ DE ✗ EN ✗
+- NACE codes: NL ✓ FR ✓ DE ✓ EN ✓ (fully multilingual)
+
+**Fallback**: If user's language not available, fall back to NL → FR → first available.
+
+---
+
 ## Final Schema Design
 
 ### Core Tables
 
-#### 1. Enterprises (Denormalized Core)
+#### 1. Enterprises (Core - Codes Only)
 ```sql
 CREATE TABLE enterprises (
   enterprise_number VARCHAR PRIMARY KEY,
 
-  -- Basic info
+  -- Basic info (codes only - descriptions via JOIN to codes table)
   status VARCHAR,  -- AC (active) or ST (stopped)
-  juridical_situation VARCHAR,
-  juridical_situation_desc_nl VARCHAR,
-  juridical_situation_desc_fr VARCHAR,
-  type_of_enterprise VARCHAR,  -- 1=natural person, 2=legal person
-  juridical_form VARCHAR,
-  juridical_form_desc_nl VARCHAR,
-  juridical_form_desc_fr VARCHAR,
-  juridical_form_cac VARCHAR,
+  juridical_situation VARCHAR,  -- code e.g., "000"
+  type_of_enterprise VARCHAR,   -- 1=natural person, 2=legal person
+  juridical_form VARCHAR,        -- code e.g., "030"
+  juridical_form_cac VARCHAR,    -- code
   start_date DATE,
 
-  -- Primary denomination (denormalized - always exists)
+  -- Primary denomination (denormalized - always exists, 100% coverage)
   primary_name_nl VARCHAR NOT NULL,
   primary_name_fr VARCHAR,
-  primary_name_type VARCHAR,  -- 001, 002, 003, 004
+  primary_name_de VARCHAR,       -- Added for German-speaking regions
+  primary_name_type VARCHAR,     -- 001, 002, 003, 004
 
   -- Temporal tracking
   _snapshot_date DATE,
   _extract_number INTEGER,
   _is_current BOOLEAN  -- true for current snapshot, false for historical
 );
-
-CREATE INDEX idx_ent_number ON enterprises(enterprise_number, _is_current);
-CREATE INDEX idx_ent_name_nl ON enterprises(primary_name_nl) WHERE _is_current = true;
-CREATE INDEX idx_ent_snapshot ON enterprises(_snapshot_date);
 ```
 
 **Rationale**:
-- All enterprises have at least one denomination (100% coverage)
-- Denormalize primary name for fast search/display
-- Keep basic fields for filtering (status, juridical form, etc.)
-- Do NOT denormalize address (40% NULL) or activities (huge)
+- **Store codes only**, not descriptions (flexible, saves space)
+- **JOIN to codes table** at query time for user's preferred language
+- Denormalize primary name for fast search (100% coverage)
+- Keep basic fields for filtering (status, juridical form codes)
+- Support 3 languages in primary name (NL/FR/DE) for diverse regions
 
 #### 2. Establishments (Denormalized Core)
 ```sql
@@ -95,9 +259,6 @@ CREATE TABLE establishments (
   _extract_number INTEGER,
   _is_current BOOLEAN
 );
-
-CREATE INDEX idx_est_enterprise ON establishments(enterprise_number, _is_current);
-CREATE INDEX idx_est_number ON establishments(establishment_number, _is_current);
 ```
 
 #### 3. Denominations (All Names - Link Table)
@@ -107,7 +268,7 @@ CREATE TABLE denominations (
   entity_number VARCHAR NOT NULL,  -- enterprise or establishment number
   entity_type VARCHAR NOT NULL,  -- 'enterprise' or 'establishment'
   denomination_type VARCHAR NOT NULL,  -- 001, 002, 003, 004
-  language VARCHAR NOT NULL,  -- 0=FR, 1=DE, 2=NL, 3=EN, 4=unknown
+  language VARCHAR NOT NULL,  -- 0=unknown, 1=FR, 2=NL, 3=DE, 4=EN
   denomination VARCHAR NOT NULL,
 
   -- Temporal tracking
@@ -115,9 +276,6 @@ CREATE TABLE denominations (
   _extract_number INTEGER,
   _is_current BOOLEAN
 );
-
-CREATE INDEX idx_denom_entity ON denominations(entity_number, _is_current);
-CREATE INDEX idx_denom_text ON denominations(denomination) WHERE _is_current = true;
 ```
 
 **Rationale**:
@@ -151,11 +309,6 @@ CREATE TABLE addresses (
   _extract_number INTEGER,
   _is_current BOOLEAN
 );
-
-CREATE INDEX idx_addr_entity ON addresses(entity_number, _is_current);
-CREATE INDEX idx_addr_zipcode ON addresses(zipcode) WHERE _is_current = true;
-CREATE INDEX idx_addr_municipality ON addresses(municipality_nl) WHERE _is_current = true;
-CREATE INDEX idx_addr_type ON addresses(type_of_address, _is_current);
 ```
 
 **Rationale**:
@@ -201,11 +354,6 @@ CREATE TABLE activities (
 
   FOREIGN KEY (nace_version, nace_code) REFERENCES nace_codes(nace_version, nace_code)
 );
-
-CREATE INDEX idx_act_entity ON activities(entity_number, _is_current);
-CREATE INDEX idx_act_code ON activities(nace_code, _is_current);
-CREATE INDEX idx_act_classification ON activities(classification, _is_current);
-CREATE INDEX idx_act_composite ON activities(entity_number, classification, nace_version, _is_current);
 ```
 
 **Rationale**:
@@ -233,8 +381,6 @@ CREATE TABLE contacts (
   _extract_number INTEGER,
   _is_current BOOLEAN
 );
-
-CREATE INDEX idx_contact_entity ON contacts(entity_number, _is_current);
 ```
 
 #### 8. Branches (Foreign Entities)
@@ -451,7 +597,7 @@ export async function POST(req: Request) {
 ```typescript
 interface Denomination {
   EntityNumber: string;
-  Language: string;  // 0=FR, 1=DE, 2=NL, 3=EN, 4=unknown
+  Language: string;  // 0=unknown, 1=FR, 2=NL, 3=DE, 4=EN
   TypeOfDenomination: string;  // 001, 002, 003, 004
   Denomination: string;
 }
@@ -464,9 +610,9 @@ function selectPrimaryDenomination(denominations: Denomination[]): {
   // Priority order
   const priorities = [
     { type: '001', lang: '2' },  // Legal name, Dutch
-    { type: '001', lang: '0' },  // Legal name, French
+    { type: '001', lang: '1' },  // Legal name, French
     { type: '003', lang: '2' },  // Commercial name, Dutch
-    { type: '003', lang: '0' },  // Commercial name, French
+    { type: '003', lang: '1' },  // Commercial name, French
   ];
 
   let primaryNL = null;
@@ -518,7 +664,7 @@ SELECT
       END,
       CASE Language
         WHEN '2' THEN 1  -- Dutch
-        WHEN '0' THEN 2  -- French
+        WHEN '1' THEN 2  -- French
         ELSE 3
       END
   ) as priority_rank
@@ -535,7 +681,7 @@ INSERT INTO enterprises (
 SELECT
   e.EnterpriseNumber,
   MAX(CASE WHEN d.Language = '2' THEN d.Denomination END) as primary_name_nl,
-  MAX(CASE WHEN d.Language = '0' THEN d.Denomination END) as primary_name_fr,
+  MAX(CASE WHEN d.Language = '1' THEN d.Denomination END) as primary_name_fr,
   MAX(d.TypeOfDenomination) as primary_name_type,
   ...
 FROM read_csv('enterprise.csv', AUTO_DETECT=TRUE) e
@@ -551,17 +697,42 @@ GROUP BY e.EnterpriseNumber, ...;
 
 ### Common Queries
 
-#### 1. Search enterprises by name (current)
+#### 1. Search enterprises by name (current) - With Code Descriptions
 ```sql
+-- User prefers Dutch (NL)
 SELECT
   e.enterprise_number,
   e.primary_name_nl,
   e.primary_name_fr,
   e.status,
-  e.juridical_form_desc_nl
-FROM enterprises_current e
-WHERE e.primary_name_nl ILIKE '%veneco%'
-  OR e.primary_name_fr ILIKE '%veneco%'
+  c_status.description AS status_desc,
+  e.juridical_form,
+  c_jur.description AS juridical_form_desc
+FROM enterprises e
+LEFT JOIN codes c_status
+  ON c_status.category = 'Status'
+  AND c_status.code = e.status
+  AND c_status.language = 'NL'
+LEFT JOIN codes c_jur
+  ON c_jur.category = 'JuridicalForm'
+  AND c_jur.code = e.juridical_form
+  AND c_jur.language = 'NL'
+WHERE e._is_current = true
+  AND (e.primary_name_nl ILIKE '%veneco%' OR e.primary_name_fr ILIKE '%veneco%')
+LIMIT 100;
+
+-- Or use a user language parameter
+SELECT
+  e.enterprise_number,
+  COALESCE(e.primary_name_nl, e.primary_name_fr, e.primary_name_de) AS name,
+  e.status,
+  c_jur.description AS juridical_form_desc
+FROM enterprises e
+LEFT JOIN codes c_jur
+  ON c_jur.category = 'JuridicalForm'
+  AND c_jur.code = e.juridical_form
+  AND c_jur.language = :user_language  -- 'NL', 'FR', 'DE', or 'EN'
+WHERE e._is_current = true
 LIMIT 100;
 ```
 
@@ -674,41 +845,223 @@ ORDER BY
 
 ---
 
-## Performance Considerations
+## Query Performance Strategy
 
-### Indexes
-- Primary keys on all tables
-- Index on `_is_current` for fast current data queries
-- Composite indexes on frequently joined columns
-- Text indexes on name fields for search
+### Why No Indexes?
 
-### Partitioning (Future)
-If data grows beyond 2 years:
+**Critical Understanding: Motherduck does NOT use indexes for query acceleration.**
+
+From Motherduck documentation:
+> "While the syntax is supported, indexes are not currently utilized for query acceleration in MotherDuck. Indexes can significantly slow down INSERT operations without any corresponding advantages."
+
+**Therefore: DO NOT create indexes in this schema.**
+
+### Architecture Optimization
+
+**Local DuckDB (Monthly ETL)**:
+- One-pass CSV → transformation → Parquet pipeline
+- No complex queries during processing
+- **Indexes not needed** - would only slow down inserts
+
+**Motherduck (Production)**:
+- Columnar Parquet storage already optimized for analytical queries
+- Query performance comes from:
+  - **Column pruning** (only read needed columns)
+  - **Predicate pushdown** (filter during scan)
+  - **Partition pruning** (filter by `_is_current`, `_snapshot_date`)
+- **Indexes not used** - would waste storage and slow down daily updates
+
+### Efficient Query Patterns
+
+Write queries that work well with columnar storage:
+
 ```sql
--- Partition by year
+-- ✅ GOOD: Equality filters (very fast with columnar storage)
+SELECT * FROM enterprises
+WHERE enterprise_number = '0200.065.765'
+  AND _is_current = true;
+
+-- ✅ GOOD: Prefix search (columnar min/max statistics help)
+SELECT enterprise_number, primary_name_nl
+FROM enterprises
+WHERE primary_name_nl LIKE 'ABC%'
+  AND _is_current = true
+LIMIT 100;
+
+-- ✅ GOOD: Filter on indexed columns first
+SELECT e.*, a.zipcode
+FROM enterprises e
+JOIN addresses a ON e.enterprise_number = a.entity_number
+WHERE e._is_current = true  -- Filter small dataset first
+  AND a.zipcode = '9000'
+  AND a._is_current = true;
+
+-- ⚠️ SLOWER: Case-insensitive substring search (full scan)
+SELECT * FROM enterprises
+WHERE lower(primary_name_nl) LIKE '%veneco%'
+  AND _is_current = true;
+
+-- ⚠️ SLOWER: Multi-table JOINs with substring search
+-- Consider external search service for this use case
+```
+
+### Search Strategies by Use Case
+
+**1. Exact Lookups (Enterprise Number, Zipcode, NACE Code)**
+- ✅ Use direct SQL queries to Motherduck
+- Very fast with columnar storage (equality filters)
+- No additional infrastructure needed
+
+**2. Prefix Search (Name starts with "ABC")**
+- ✅ Use SQL with `LIKE 'ABC%'`
+- Acceptable performance with columnar min/max statistics
+- Good for dropdown autocomplete with known prefix
+
+**3. Full-Text Search (Any word in name)**
+- ❌ Don't use SQL ILIKE '%keyword%' in production (slow)
+- ✅ Use external search service:
+  - **Elasticsearch / OpenSearch** - Industry standard, full-featured
+  - **Typesense** - Open source, typo-tolerant, fast
+  - **MeiliSearch** - Lightweight, great developer experience
+  - Sync data from Motherduck via nightly job
+  - Return enterprise numbers, then JOIN in Motherduck for full details
+
+**4. Fuzzy Search (Typo tolerance)**
+- ❌ Can't do efficiently in SQL
+- ✅ Use client-side library for small datasets:
+  - **Fuse.js** - Fuzzy search in browser
+  - **MiniSearch** - Lightweight full-text in browser
+  - Load current enterprise names (~2M rows × 50 bytes = 100MB) into app memory
+  - Good for internal tools with infrequent data refresh
+
+**5. Faceted Search (Filter by location + activity + status)**
+- ✅ Use SQL with multiple WHERE clauses
+- Columnar storage handles multi-column filters well
+- Example:
+```sql
+SELECT e.enterprise_number, e.primary_name_nl
+FROM enterprises e
+JOIN addresses a ON e.enterprise_number = a.entity_number
+JOIN activities act ON e.enterprise_number = act.entity_number
+WHERE e.status = 'AC'
+  AND a.zipcode = '9000'
+  AND act.nace_code = '84130'
+  AND e._is_current = true
+  AND a._is_current = true
+  AND act._is_current = true;
+```
+
+### Recommended Architecture
+
+**For production deployment:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        User Request                          │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+         ┌─────────────────────────────┐
+         │   Next.js API Routes        │
+         │   (Vercel Edge Functions)   │
+         └─────────────┬───────────────┘
+                       │
+         ┌─────────────┴────────────────┐
+         │                              │
+         ▼                              ▼
+┌─────────────────┐           ┌──────────────────┐
+│  Motherduck     │           │  Typesense       │
+│  (Structured    │           │  (Full-Text      │
+│   Queries)      │           │   Search)        │
+└─────────────────┘           └──────────────────┘
+         │                              │
+         │    Nightly Sync Job          │
+         └──────────────►───────────────┘
+```
+
+**Query routing logic:**
+```typescript
+// Exact lookup → Motherduck
+if (query.enterpriseNumber) {
+  return motherduck.query(`SELECT * FROM enterprises WHERE enterprise_number = ?`, [query.enterpriseNumber]);
+}
+
+// Full-text search → Typesense → Motherduck
+if (query.searchText && query.searchText.length > 0) {
+  const results = await typesense.search({ q: query.searchText, query_by: 'primary_name_nl,primary_name_fr' });
+  const enterpriseNumbers = results.hits.map(h => h.document.enterprise_number);
+  return motherduck.query(`SELECT * FROM enterprises WHERE enterprise_number IN (?)`, [enterpriseNumbers]);
+}
+
+// Faceted filters → Motherduck
+if (query.zipcode || query.naceCode || query.status) {
+  return motherduck.query(`SELECT ... WHERE zipcode = ? AND status = ?`, [query.zipcode, query.status]);
+}
+```
+
+### Performance Tuning
+
+**Monitor and optimize:**
+1. **Query execution time** - Add logging to Motherduck queries
+2. **Column selection** - Only SELECT columns you need
+3. **Filter order** - Apply most selective filters first
+4. **LIMIT clauses** - Always limit result sets for user-facing queries
+5. **Caching** - Cache frequent queries (enterprise lookups, code tables)
+
+**Example optimization:**
+```sql
+-- ❌ SLOW: Select all columns, filter last
+SELECT *
+FROM enterprises e
+JOIN activities act ON e.enterprise_number = act.entity_number
+WHERE lower(e.primary_name_nl) LIKE '%test%';
+
+-- ✅ FAST: Select needed columns, filter first, limit results
+SELECT e.enterprise_number, e.primary_name_nl, e.status
+FROM enterprises e
+WHERE e._is_current = true
+  AND e.primary_name_nl LIKE 'Test%'  -- Prefix search
+LIMIT 100;
+```
+
+### Future Optimizations
+
+**If query performance becomes an issue:**
+
+1. **Materialized views** for common queries:
+```sql
+CREATE MATERIALIZED VIEW enterprises_with_activity AS
+SELECT
+  e.enterprise_number,
+  e.primary_name_nl,
+  e.status,
+  act.nace_code,
+  n.description_nl
+FROM enterprises e
+LEFT JOIN activities act ON e.enterprise_number = act.entity_number
+LEFT JOIN nace_codes n ON act.nace_code = n.nace_code
+WHERE e._is_current = true AND act._is_current = true;
+```
+
+2. **Partitioning** by snapshot date (for historical queries):
+```sql
 CREATE TABLE enterprises (
   ...
 ) PARTITION BY YEAR(_snapshot_date);
 ```
 
-### Materialized Views (Future)
-For expensive common queries:
+3. **Pre-aggregated statistics** table:
 ```sql
-CREATE MATERIALIZED VIEW enterprises_with_primary_activity AS
+CREATE TABLE enterprise_stats AS
 SELECT
-  e.*,
-  act.nace_code,
-  n.description_nl as activity_desc
-FROM enterprises_current e
-LEFT JOIN activities act
-  ON e.enterprise_number = act.entity_number
-  AND act.classification = 'MAIN'
-  AND act.activity_group = '003'
-  AND act.nace_version = '2025'
-  AND act._is_current = true
-LEFT JOIN nace_codes n
-  ON act.nace_code = n.nace_code
-  AND act.nace_version = n.nace_version;
+  zipcode,
+  nace_code,
+  COUNT(*) as enterprise_count
+FROM enterprises e
+JOIN addresses a ON e.enterprise_number = a.entity_number
+JOIN activities act ON e.enterprise_number = act.entity_number
+WHERE e._is_current = true
+GROUP BY zipcode, nace_code;
 ```
 
 ---
@@ -745,6 +1098,44 @@ Assuming $0.02/GB/month storage:
 - Query costs depend on usage (Motherduck uses DuckDB's efficient columnar format)
 
 **Conclusion**: Storage is negligible. Parquet + link tables = massive savings.
+
+---
+
+## Future Integrations (Beyond KBO Open Data)
+
+The following data sources could enhance the platform but are **NOT included in KBO Open Data**:
+
+### 1. Financial Data
+- **Sources**: Belgian National Bank (NBB), Official Gazette
+- **Data**: Capital amounts, fiscal year dates, annual assembly dates, balance sheets
+- **Access**: Requires separate API subscription or data sharing agreement
+
+### 2. NSSO/RSZ Employer Data
+- **Source**: NSSO (National Social Security Office)
+- **Data**: Employer numbers, employee count ranges, sector codes
+- **Access**: Requires formal data sharing agreement, privacy-sensitive
+
+### 3. Board Members & Corporate Roles
+- **Sources**: Official Gazette, Notarial acts
+- **Data**: Directors, managers, appointment/resignation dates
+- **Access**: Web scraping or API, privacy considerations for natural persons
+
+### 4. Real-time VAT Validation
+- **Source**: EU VIES (VAT Information Exchange System)
+- **Data**: Real-time VAT number validation for cross-border transactions
+- **Access**: Public API, rate-limited
+
+### 5. Geographic Enrichment
+- **Sources**: StatBel, OpenStreetMap, BeST Address Registry
+- **Data**: Geolocation coordinates, statistical sectors, NIS codes
+- **Access**: Public APIs, one-time geocoding batch job
+
+### 6. Credit Ratings & Risk Data
+- **Sources**: Graydon, Creditsafe, other commercial providers
+- **Data**: Credit scores, payment behavior, bankruptcy predictions
+- **Access**: Paid subscriptions, legal restrictions on redistribution
+
+**Note**: These integrations would require separate implementation phases, data agreements, and schema extensions. The current platform focuses exclusively on KBO Open Data (9 CSV files).
 
 ---
 
