@@ -170,17 +170,17 @@ CREATE TABLE nace_codes (
   nace_code VARCHAR NOT NULL,
   description_nl VARCHAR,
   description_fr VARCHAR,
-  description_de VARCHAR,
-  description_en VARCHAR,
   PRIMARY KEY (nace_version, nace_code)
 );
 
 -- Load once from code.csv, never changes per snapshot
+-- Note: KBO only provides NL and FR descriptions for NACE codes
 ```
 
 **Rationale**:
 - 7,265 unique NACE codes across 3 versions
-- Descriptions are 150-200 chars each
+- Descriptions are 150-200 chars each (NL and FR only)
+- KBO does not provide DE or EN translations for NACE codes
 - Storing separately avoids repeating 36M times
 
 #### 6. Activities (Link Table - CRITICAL)
