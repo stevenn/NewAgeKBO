@@ -58,7 +58,7 @@ Duration: ~5 minutes
 
 **Daily Updates** (~156 changes/day):
 ```
-Vercel Cron (8am) → Download ZIP → Parse CSV → SQL (Motherduck)
+Vercel Cron (12:00 CET) → Download ZIP → Parse CSV → UPDATE/INSERT (Motherduck)
 Duration: <1 minute
 ```
 
@@ -89,7 +89,7 @@ Duration: <1 minute
 ### Temporal Tracking
 - `_is_current` boolean flag for live data
 - `_snapshot_date` for historical queries
-- Monthly snapshots on first Sunday
+- Monthly snapshots when new full dataset available
 - Point-in-time queries with monthly granularity
 
 ---
@@ -204,22 +204,25 @@ NewAgeKBO/
 - [x] Storage strategy (2.5 GB for 2 years)
 - [x] Primary selection rules defined
 
-### 🔄 Phase 1: Foundation (Week 1-2)
+### 🔄 Phase 1: Foundation & Initial Import (Week 1-2)
 - [ ] Set up Motherduck account and connection
+- [ ] Create schema (all tables) in Motherduck
 - [ ] Implement primary selection logic (SQL + TypeScript)
-- [ ] Test full import with sample data
-- [ ] Verify temporal tracking
+- [ ] **Perform initial full import** to populate Motherduck
+- [ ] Verify temporal tracking and data integrity
 
-### 📅 Phase 2: Data Pipeline (Week 3-4)
-- [ ] Build CSV → DuckDB → Parquet pipeline
+### 📅 Phase 2: Monthly Full Import Pipeline (Week 3-4)
+- [ ] Build CSV → DuckDB → Parquet transformation pipeline (local)
 - [ ] Implement link table transformations
-- [ ] Test Motherduck upload
+- [ ] Implement snapshot rotation logic (`_is_current` updates)
+- [ ] Test full re-import with sample data
 - [ ] Benchmark with full dataset
 
-### 🌐 Phase 3: Web Application (Week 5-7)
+### 🌐 Phase 3: Daily Update Pipeline & Web App (Week 5-7)
 - [ ] Initialize Next.js app
+- [ ] Build daily update cron job (Vercel, 12:00 CET)
+- [ ] Implement delete/insert logic for incremental updates
 - [ ] API routes for Motherduck queries
-- [ ] Daily update cron job (Vercel)
 - [ ] Admin UI for job monitoring
 
 ### 🎨 Phase 4: Features (Week 8-10)

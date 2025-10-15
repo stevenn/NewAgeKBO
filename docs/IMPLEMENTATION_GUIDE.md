@@ -491,11 +491,571 @@ ORDER BY _snapshot_date;
 
 ---
 
+## Implementation Workflow
+
+This section describes the complete lifecycle of data management, from initial setup through ongoing operations.
+
+### Initial Setup (One-Time)
+
+**Purpose**: Populate Motherduck with the first full dataset
+
+**Steps**:
+1. Create Motherduck account and database
+2. Run schema creation DDL (all tables from schema section above)
+3. Download first full dataset ZIP from KBO portal
+4. Extract and validate `meta.csv` (SnapshotDate, ExtractNumber)
+5. Process locally with DuckDB:
+   - Load CSVs
+   - Apply transformations (denormalization, primary selection)
+   - Export to Parquet with ZSTD compression
+6. Upload Parquet files to Motherduck
+7. All imported data marked with `_is_current = true`
+8. Record metadata in `import_jobs` table
+
+**Duration**: ~10 minutes for full dataset (1.9M enterprises, 46M total rows)
+
+**Result**: Motherduck contains complete current snapshot, ready for queries and daily updates
+
+---
+
+### Daily Operations (Automated Cron)
+
+**Purpose**: Apply incremental changes to existing Motherduck data
+
+**Trigger**: Vercel cron job, daily at **12:00 CET/CEST** (midday Belgian time)
+
+**Prerequisites**: Initial full import must be completed (data exists in Motherduck)
+
+**Process**:
+1. Download daily update ZIP from KBO API
+2. Extract update files (`*_delete.csv` and `*_insert.csv`)
+3. Connect to Motherduck
+4. **Process deletes** (mark existing rows as historical):
+   ```sql
+   -- For each enterprise_number in enterprise_delete.csv
+   UPDATE enterprises
+   SET _is_current = false, _snapshot_date = CURRENT_DATE
+   WHERE enterprise_number = ? AND _is_current = true;
+
+   -- Cascade to related tables (activities, addresses, etc.)
+   ```
+5. **Process inserts** (add new/updated rows):
+   ```sql
+   -- For each row in enterprise_insert.csv
+   INSERT INTO enterprises (..., _is_current, _extract_number, _snapshot_date)
+   VALUES (..., true, ?, CURRENT_DATE);
+   ```
+6. Log job status in `import_jobs` table
+7. Update last_updated timestamp
+
+**Duration**: <1 minute (~156 changes/day average)
+
+**Important**: Daily update files contain **complete replacement data**, not diffs:
+- `*_delete.csv`: Entity numbers to mark as historical
+- `*_insert.csv`: Complete new/updated records (not just changed fields)
+
+---
+
+### Monthly Full Import (Manual/Triggered)
+
+**Purpose**: Create historical snapshot + refresh all current data
+
+**Trigger**: When operator detects new full dataset available on KBO portal
+
+**Frequency**: Approximately monthly (no fixed schedule - check portal manually)
+
+**Process**:
+1. **Download** new full dataset ZIP from KBO portal
+2. **Validate** `meta.csv`:
+   - Check SnapshotDate (should be newer than last import)
+   - Check ExtractNumber (should be higher)
+   - Verify ExtractType = "Full"
+3. **Mark current data as historical** (in Motherduck):
+   ```sql
+   UPDATE enterprises SET _is_current = false WHERE _is_current = true;
+   UPDATE activities SET _is_current = false WHERE _is_current = true;
+   -- ... (all tables)
+   ```
+4. **Process locally** with DuckDB:
+   - Load all CSVs
+   - Apply transformations (denormalization, primary selection, link tables)
+   - Set `_snapshot_date` from meta.csv
+   - Set `_extract_number` from meta.csv
+   - Mark all with `_is_current = true`
+   - Export to Parquet (ZSTD compression)
+5. **Upload** Parquet files to Motherduck
+6. **Verify** import success:
+   - Check row counts
+   - Verify `_is_current` distribution (old = false, new = true)
+   - Test sample queries
+7. **Log** job status in `import_jobs` table
+
+**Duration**: ~5-10 minutes for full dataset
+
+**Storage**: Each monthly snapshot adds ~100MB (Parquet, ZSTD)
+
+**Result**:
+- New current snapshot (`_is_current = true`)
+- Previous snapshot preserved as history (`_is_current = false`)
+- Point-in-time queries available for all monthly snapshots
+
+---
+
+## Component Architecture
+
+This section documents the complete system architecture, organized by functional area.
+
+### 1. KBO Data Access Layer
+
+**Purpose**: Interface with KBO Open Data portal for downloading datasets
+
+**Components**:
+- **KBO Portal Client** (`lib/kbo-client/`)
+  - Authenticate with KBO portal credentials (username/password)
+  - Parse XML feed from `/affiliation/xml/?files` to list available datasets
+  - Download ZIP files (full datasets and daily updates)
+  - Extract and parse meta.csv for validation
+  - Retry logic for network failures
+  - Error handling for authentication failures
+
+**Key Functions**:
+```typescript
+// lib/kbo-client/index.ts
+async function authenticate(): Promise<Session>
+async function listDatasets(): Promise<Dataset[]>
+async function downloadDataset(extractNumber: number): Promise<Buffer>
+async function parseMeta(zipBuffer: Buffer): Promise<MetaData>
+```
+
+---
+
+### 2. Local ETL Scripts (CLI)
+
+**Purpose**: Command-line tools for initial and monthly data imports (run on local machine)
+
+**Components**:
+
+**Initial Import Script** (`scripts/initial-import.ts`):
+- Download first full dataset from KBO portal
+- Create Motherduck database and schema (all tables)
+- Process CSVs with DuckDB locally
+- Apply transformations (denormalization, primary selection, link tables)
+- Export to Parquet with ZSTD compression
+- Upload to Motherduck
+- Verify success (row counts, referential integrity)
+- Record import job metadata
+
+**Monthly Import Script** (`scripts/monthly-import.ts`):
+- Check KBO portal for new full dataset
+- Validate meta.csv (SnapshotDate, ExtractNumber)
+- Mark current Motherduck data as historical (`_is_current = false`)
+- Process new dataset locally with DuckDB
+- Apply transformations
+- Export to Parquet
+- Upload to Motherduck (new snapshot with `_is_current = true`)
+- Verify import success
+- Log to import_jobs table
+
+**Shared Transform Logic** (`lib/transform/`):
+- Primary denomination selection (SQL logic from schema section)
+- Link table transformations (activities → NACE codes)
+- DuckDB local processing utilities
+- Parquet export with ZSTD compression
+- Meta.csv parsing and validation
+
+**Key Functions**:
+```typescript
+// lib/transform/denominations.ts
+function selectPrimaryDenomination(denominations: Denomination[]): PrimaryName
+
+// lib/transform/activities.ts
+function createActivityLinkTable(activities: Activity[]): ActivityLink[]
+
+// lib/transform/parquet.ts
+function exportToParquet(tableName: string, outputPath: string): Promise<void>
+```
+
+---
+
+### 3. Daily Update Cron (Vercel)
+
+**Purpose**: Automated daily updates to Motherduck data
+
+**Components**:
+
+**Cron Job** (`app/api/cron/daily-update/route.ts`):
+- **Trigger**: Vercel cron, daily at 12:00 CET/CEST
+- **Authentication**: Validate `CRON_SECRET` from Authorization header
+- Download daily update ZIP from KBO API
+- Parse `*_delete.csv` and `*_insert.csv` files
+- Execute SQL UPDATE (mark deleted rows as historical)
+- Execute SQL INSERT (add new/updated rows)
+- Log results to import_jobs table
+- Return status (success/failure)
+
+**CRON_SECRET Security**:
+- Environment variable set in Vercel
+- Vercel automatically sends as `Authorization: Bearer {CRON_SECRET}` header
+- Endpoint validates header before processing
+- Prevents unauthorized execution of expensive operations
+
+**Example**:
+```typescript
+// app/api/cron/daily-update/route.ts
+export async function POST(request: Request) {
+  // Verify request is from Vercel Cron
+  const authHeader = request.headers.get('authorization');
+  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    return new Response('Unauthorized', { status: 401 });
+  }
+
+  // Process daily update...
+}
+```
+
+**Motherduck Connection** (`lib/motherduck/`):
+- Connection string management
+- Query execution wrapper
+- Transaction handling (for delete+insert atomicity)
+- Connection pooling (if needed)
+- Error handling and retry logic
+
+---
+
+### 4. Admin Web UI (Vercel Next.js)
+
+**Purpose**: Internal administrative interface (authentication required)
+
+**Components**:
+
+**Import Jobs Dashboard** (`app/admin/jobs/`):
+- List all import jobs (paginated table)
+- Filter by status (pending/running/completed/failed)
+- Filter by type (full/daily)
+- Filter by date range
+- View job details:
+  - Extract number, snapshot date
+  - Records processed/inserted/updated/deleted
+  - Duration, error messages
+  - Worker type (local/vercel)
+- Retry failed jobs (button)
+
+**Manual Triggers** (`app/admin/triggers/`):
+- Trigger daily update check manually (bypass cron schedule)
+- Mark monthly import as complete (after local CLI processing)
+- Test Motherduck connection (health check)
+
+**System Status** (`app/admin/status/`):
+- Last successful import timestamp
+- Current row counts by table (enterprises, activities, etc.)
+- Current extract number
+- Storage usage (from Motherduck API)
+- Simple health indicators (green/yellow/red)
+
+**Data Viewer** (`app/admin/data/`):
+- Browse tables (dropdown selector)
+- View sample rows (paginated, default 100 rows)
+- Execute ad-hoc SQL queries (admin only, with safety warnings)
+- Export results to CSV
+- View table schema (columns, types)
+
+**Motherduck Shares Management** (`app/admin/shares/`):
+- List existing shares
+- Create new share:
+  - Name
+  - Permissions (read-only/read-write)
+  - Select tables to include
+- View share connection strings
+- Revoke shares
+- Basic usage stats (query count, last access)
+
+**User Management** (`app/admin/users/`):
+- List users (from Clerk)
+- Assign admin role
+- Map user to Motherduck share (manual assignment)
+- View user activity
+
+---
+
+### 5. Authentication & Authorization (Clerk)
+
+**Purpose**: User management and access control
+
+**Components**:
+
+**Clerk Integration** (`middleware.ts` + `lib/auth/`):
+- User signup/login (email/password, OAuth providers)
+- Session management
+- Role-based access control:
+  - **admin**: Full access to all admin pages
+  - **none**: No access (default for new users)
+- Protect all `/admin/*` routes via middleware
+
+**Middleware**:
+```typescript
+// middleware.ts
+import { authMiddleware } from '@clerk/nextjs';
+
+export default authMiddleware({
+  publicRoutes: ['/'],
+});
+```
+
+**Authorization Helper**:
+```typescript
+// lib/auth/index.ts
+async function requireAdmin(userId: string): Promise<void>
+async function hasAdminRole(userId: string): Promise<boolean>
+```
+
+---
+
+### 6. Shared TypeScript Components
+
+**Purpose**: Reusable utilities and types across the application
+
+**Components**:
+
+**Data Models** (`lib/types/`):
+```typescript
+// lib/types/enterprise.ts
+interface Enterprise {
+  enterprise_number: string;
+  status: string;
+  juridical_form: string;
+  primary_name_nl: string;
+  primary_name_fr: string | null;
+  primary_name_de: string | null;
+  _is_current: boolean;
+  _snapshot_date: Date;
+}
+
+// lib/types/import-job.ts
+enum ImportJobStatus {
+  Pending = 'pending',
+  Running = 'running',
+  Completed = 'completed',
+  Failed = 'failed',
+}
+
+interface ImportJob {
+  id: string;
+  extract_number: number;
+  extract_type: 'full' | 'update';
+  status: ImportJobStatus;
+  started_at: Date;
+  completed_at: Date | null;
+  error_message: string | null;
+  records_processed: number;
+}
+```
+
+**Validation** (`lib/validation/`):
+```typescript
+// lib/validation/enterprise-number.ts
+function validateEnterpriseNumber(number: string): boolean
+
+// lib/validation/meta-csv.ts
+function parseMetaCsv(content: string): MetaData
+function validateMeta(meta: MetaData): ValidationResult
+```
+
+**Utilities** (`lib/utils/`):
+```typescript
+// lib/utils/date.ts
+function getCurrentCET(): Date
+function formatSnapshotDate(date: Date): string
+
+// lib/utils/extract.ts
+function parseExtractNumber(filename: string): number
+function compareExtractNumbers(a: number, b: number): number
+```
+
+**Error Handling** (`lib/errors/`):
+```typescript
+// lib/errors/index.ts
+class KBOPortalError extends Error {}
+class MotherduckError extends Error {}
+class ValidationError extends Error {}
+
+function logError(error: Error, context: object): void
+function formatUserError(error: Error): string
+```
+
+---
+
+### 7. Configuration Management
+
+**Purpose**: Centralize environment-specific settings
+
+**Environment Variables**:
+
+```bash
+# KBO Portal Access
+KBO_USERNAME=your_username
+KBO_PASSWORD=your_password
+
+# Motherduck Connection
+MOTHERDUCK_TOKEN=your_token_here
+
+# Authentication
+CLERK_SECRET_KEY=sk_test_...
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
+
+# Cron Security
+CRON_SECRET=generated_with_openssl_rand_hex_32
+
+# Environment
+NODE_ENV=production
+NEXT_PUBLIC_APP_URL=https://your-app.vercel.app
+```
+
+**Configuration Files**:
+- `.env.local` - Local development (gitignored)
+- Vercel Project Settings - Production environment variables
+- `vercel.json` - Cron schedule configuration
+
+**Cron Configuration** (`vercel.json`):
+```json
+{
+  "crons": [{
+    "path": "/api/cron/daily-update",
+    "schedule": "0 12 * * *"
+  }]
+}
+```
+
+**CRON_SECRET Explanation**:
+- Generate: `openssl rand -hex 32`
+- Vercel automatically includes as: `Authorization: Bearer {CRON_SECRET}`
+- Endpoint validates header to prevent unauthorized access
+- Required for all cron endpoints
+
+---
+
+### 8. Data Quality & Monitoring
+
+**Purpose**: Ensure data integrity and track system health
+
+**Components**:
+
+**Data Quality Checks** (`lib/quality/`):
+```typescript
+// lib/quality/validation.ts
+async function validateImport(extractNumber: number): Promise<ValidationResult>
+async function checkRowCounts(expected: RowCounts): Promise<boolean>
+async function checkReferentialIntegrity(): Promise<IntegrityIssue[]>
+```
+
+**Checks Performed**:
+- Row count validation (compare against previous import)
+- Referential integrity (all activities reference valid enterprises)
+- Anomaly detection (sudden drops >10% flag warning)
+- Duplicate enterprise numbers (should not exist)
+
+**Logging** (`lib/logger/`):
+```typescript
+// lib/logger/index.ts
+function logInfo(message: string, context?: object): void
+function logError(error: Error, context?: object): void
+function logImportJob(job: ImportJob): void
+```
+
+**Logging Strategy**:
+- Structured JSON logging to Vercel logs (built-in)
+- No external logging service (keep dependencies minimal)
+- Use Vercel dashboard for log viewing and searching
+
+**Alerts**:
+- Email notifications for failed cron jobs (Vercel integration)
+- Email on import failures (send via Vercel Edge Functions)
+- Simple alert configuration (admin email address in env var)
+
+---
+
+### 9. Testing Infrastructure
+
+**Purpose**: Ensure code quality and prevent regressions
+
+**Components**:
+
+**Unit Tests** (`__tests__/unit/`):
+- Transform logic (primary denomination selection)
+- Validation functions (enterprise number format)
+- Date utilities (timezone handling)
+- Meta.csv parsing
+
+**Integration Tests** (`__tests__/integration/`) - Optional, later phase:
+- KBO portal client (download and parse)
+- Motherduck queries (CRUD operations)
+- End-to-end import workflow
+
+**Testing Stack**:
+- Jest (test runner)
+- TypeScript (type safety)
+- @testing-library/react (for UI components, future)
+
+---
+
+### 10. Documentation
+
+**Purpose**: Enable operators and developers to work with the system
+
+**Components**:
+
+**Admin Operations Manual** (`docs/ADMIN_GUIDE.md`):
+- How to run initial import (step-by-step)
+- How to handle monthly imports (checklist)
+- How to create Motherduck shares
+- How to assign users to shares
+- Troubleshooting guide (common errors and solutions)
+- Rollback procedures (if import fails)
+
+**Developer Documentation**:
+- README.md updates (setup instructions, local development)
+- API documentation (future, if needed)
+- Schema reference (already in IMPLEMENTATION_GUIDE.md)
+
+**Deployment Checklist** (`docs/DEPLOYMENT.md`):
+- Vercel project setup
+- Environment variables configuration
+- Motherduck database creation
+- Initial import execution
+- Cron job verification
+- Clerk authentication setup
+
+---
+
+## Architecture Principles
+
+**Minimal External Dependencies**:
+- ✅ Clerk (authentication)
+- ✅ Motherduck (database)
+- ✅ Vercel (hosting + cron)
+- ❌ No public API
+- ❌ No caching layer for codes table
+- ❌ No external logging/monitoring service
+- ❌ No CDN or asset storage
+
+**Security**:
+- All admin routes protected by Clerk authentication
+- Cron endpoints protected by CRON_SECRET validation
+- Motherduck token stored as environment variable (never in code)
+- KBO portal credentials encrypted in Vercel
+
+**Scalability**:
+- Columnar storage (Motherduck) handles analytical queries efficiently
+- Monthly snapshots keep storage predictable (2.5 GB for 2 years)
+- Daily updates are small (~156 changes/day)
+- No real-time user traffic (internal admin tool only)
+
+---
+
 ## Data Processing Pipelines
 
 ### Pipeline 1: Monthly Full Import (Local)
 
-**Trigger**: Manual or cron (first Sunday of month)
+**Trigger**: Manual, when new full dataset available on KBO portal
 **Environment**: Local machine with DuckDB
 **Duration**: ~5 minutes for full dataset
 
@@ -538,9 +1098,10 @@ EOF
 
 ### Pipeline 2: Daily Incremental Update (Vercel)
 
-**Trigger**: Vercel cron (daily, 8am)
+**Trigger**: Vercel cron (daily, 12:00 CET/CEST)
 **Environment**: Vercel function → Motherduck
 **Duration**: <1 minute
+**Prerequisites**: Initial full import completed (Motherduck contains existing data)
 
 ```typescript
 // app/api/import-daily/route.ts
