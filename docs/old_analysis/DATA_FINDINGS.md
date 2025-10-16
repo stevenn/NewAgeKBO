@@ -387,10 +387,9 @@ CREATE TABLE nace_codes (
   nace_code VARCHAR,
   description_nl VARCHAR,
   description_fr VARCHAR,
-  description_de VARCHAR,
-  description_en VARCHAR,
   PRIMARY KEY (nace_version, nace_code)
 );
+-- Note: KBO only provides NL and FR descriptions for NACE codes
 ```
 
 **Savings**: 65% storage reduction (312 GB over 2 years)

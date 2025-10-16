@@ -154,12 +154,17 @@ LEFT JOIN codes c
 
 **Pattern 2: Denormalize Primary Name Only**
 ```sql
--- Enterprises table stores top 3 languages
+-- Enterprises table stores primary name + language tracking
+enterprises.primary_name = "Intergemeentelijke Vereniging Veneco"
+enterprises.primary_name_language = '2'  -- 2=Dutch
 enterprises.primary_name_nl = "Intergemeentelijke Vereniging Veneco"
 enterprises.primary_name_fr = NULL  -- if not available
 enterprises.primary_name_de = NULL  -- for German-speaking regions
 
--- Fallback logic in queries
+-- Display logic: use primary_name directly (already contains the best available name)
+SELECT primary_name FROM enterprises WHERE ...
+
+-- Or use language-specific fallback in queries
 COALESCE(primary_name_nl, primary_name_fr, primary_name_de) AS name
 ```
 
@@ -225,10 +230,12 @@ CREATE TABLE enterprises (
   start_date DATE,
 
   -- Primary denomination (denormalized - always exists, 100% coverage)
-  primary_name_nl VARCHAR NOT NULL,
-  primary_name_fr VARCHAR,
-  primary_name_de VARCHAR,       -- Added for German-speaking regions
-  primary_name_type VARCHAR,     -- 001, 002, 003, 004
+  primary_name VARCHAR NOT NULL,              -- Primary name (any language, never NULL)
+  primary_name_language VARCHAR,              -- Language code: 0=Unknown, 1=FR, 2=NL, 3=DE, 4=EN
+  primary_name_nl VARCHAR,                    -- Dutch version (NULL if not available)
+  primary_name_fr VARCHAR,                    -- French version (NULL if not available)
+  primary_name_de VARCHAR,                    -- German version (NULL if not available)
+  primary_name_type VARCHAR,                  -- 001, 002, 003, 004
 
   -- Temporal tracking
   _snapshot_date DATE,
@@ -252,7 +259,8 @@ CREATE TABLE establishments (
   start_date DATE,
 
   -- Primary name (if different from enterprise)
-  commercial_name VARCHAR,
+  commercial_name VARCHAR,                    -- Commercial name (Type 003, any language)
+  commercial_name_language VARCHAR,           -- Language code: 0=Unknown, 1=FR, 2=NL, 3=DE, 4=EN
 
   -- Temporal tracking
   _snapshot_date DATE,
@@ -323,17 +331,17 @@ CREATE TABLE nace_codes (
   nace_code VARCHAR NOT NULL,
   description_nl VARCHAR,
   description_fr VARCHAR,
-  description_de VARCHAR,
-  description_en VARCHAR,
   PRIMARY KEY (nace_version, nace_code)
 );
 
 -- Load once from code.csv, never changes per snapshot
+-- Note: KBO only provides NL and FR descriptions for NACE codes
 ```
 
 **Rationale**:
 - 7,265 unique NACE codes across 3 versions
-- Descriptions are 150-200 chars each
+- Descriptions are 150-200 chars each (NL and FR only)
+- KBO does not provide DE or EN translations for NACE codes
 - Storing separately avoids repeating 36M times
 
 #### 6. Activities (Link Table - CRITICAL)
@@ -512,7 +520,26 @@ This section describes the complete lifecycle of data management, from initial s
 7. All imported data marked with `_is_current = true`
 8. Record metadata in `import_jobs` table
 
-**Duration**: ~10 minutes for full dataset (1.9M enterprises, 46M total rows)
+**Duration**: ~21 minutes for full dataset (1.9M enterprises, 46.8M total rows)
+
+**Actual Import Performance** (Extract #140, 2025-10-04):
+```
+Total duration: 1255.35s (~21 minutes)
+Total rows imported: 46,757,180
+
+Breakdown by table:
+- codes:          21,500 rows (1.18s)
+- nace_codes:     10,438 rows (1.24s)
+- enterprises:  1,938,238 rows (50.20s)
+- establishments: 1,672,490 rows (24.33s)
+- denominations: 3,309,907 rows (81.31s)
+- addresses:    2,841,755 rows (128.42s)
+- activities:  36,306,368 rows (944.36s - 15.7 minutes)
+- contacts:       691,157 rows (21.55s)
+- branches:         7,325 rows (0.44s)
+```
+
+**Note**: Activities table represents 77.5% of total rows and 75% of import time due to volume.
 
 **Result**: Motherduck contains complete current snapshot, ready for queries and daily updates
 
@@ -590,7 +617,7 @@ This section describes the complete lifecycle of data management, from initial s
    - Test sample queries
 7. **Log** job status in `import_jobs` table
 
-**Duration**: ~5-10 minutes for full dataset
+**Duration**: ~21 minutes for full dataset (based on measured import of 46.8M rows)
 
 **Storage**: Each monthly snapshot adds ~100MB (Parquet, ZSTD)
 
@@ -823,7 +850,9 @@ interface Enterprise {
   enterprise_number: string;
   status: string;
   juridical_form: string;
-  primary_name_nl: string;
+  primary_name: string;
+  primary_name_language: string | null;  // 0=Unknown, 1=FR, 2=NL, 3=DE, 4=EN
+  primary_name_nl: string | null;
   primary_name_fr: string | null;
   primary_name_de: string | null;
   _is_current: boolean;
@@ -1057,7 +1086,7 @@ function logImportJob(job: ImportJob): void
 
 **Trigger**: Manual, when new full dataset available on KBO portal
 **Environment**: Local machine with DuckDB
-**Duration**: ~5 minutes for full dataset
+**Duration**: ~21 minutes for full dataset (46.8M rows)
 
 ```bash
 #!/bin/bash
@@ -1234,15 +1263,37 @@ FROM read_csv('denomination.csv', AUTO_DETECT=TRUE);
 -- Insert into enterprises with primary denomination
 INSERT INTO enterprises (
   enterprise_number,
+  primary_name,
+  primary_name_language,
   primary_name_nl,
   primary_name_fr,
+  primary_name_de,
   primary_name_type,
   ...
 )
 SELECT
   e.EnterpriseNumber,
+  -- Primary name: first available in priority order
+  COALESCE(
+    MAX(CASE WHEN d.Language = '2' THEN d.Denomination END),
+    MAX(CASE WHEN d.Language = '1' THEN d.Denomination END),
+    MAX(CASE WHEN d.Language = '0' THEN d.Denomination END),
+    MAX(CASE WHEN d.Language = '3' THEN d.Denomination END),
+    MAX(CASE WHEN d.Language = '4' THEN d.Denomination END),
+    e.EnterpriseNumber
+  ) as primary_name,
+  -- Track which language the primary_name is in
+  COALESCE(
+    MAX(CASE WHEN d.Language = '2' THEN '2' END),
+    MAX(CASE WHEN d.Language = '1' THEN '1' END),
+    MAX(CASE WHEN d.Language = '0' THEN '0' END),
+    MAX(CASE WHEN d.Language = '3' THEN '3' END),
+    MAX(CASE WHEN d.Language = '4' THEN '4' END)
+  ) as primary_name_language,
+  -- Store each language variant separately (NULL if not available)
   MAX(CASE WHEN d.Language = '2' THEN d.Denomination END) as primary_name_nl,
   MAX(CASE WHEN d.Language = '1' THEN d.Denomination END) as primary_name_fr,
+  MAX(CASE WHEN d.Language = '3' THEN d.Denomination END) as primary_name_de,
   MAX(d.TypeOfDenomination) as primary_name_type,
   ...
 FROM read_csv('enterprise.csv', AUTO_DETECT=TRUE) e
@@ -1263,8 +1314,8 @@ GROUP BY e.EnterpriseNumber, ...;
 -- User prefers Dutch (NL)
 SELECT
   e.enterprise_number,
-  e.primary_name_nl,
-  e.primary_name_fr,
+  e.primary_name,
+  e.primary_name_language,
   e.status,
   c_status.description AS status_desc,
   e.juridical_form,
@@ -1279,13 +1330,17 @@ LEFT JOIN codes c_jur
   AND c_jur.code = e.juridical_form
   AND c_jur.language = 'NL'
 WHERE e._is_current = true
-  AND (e.primary_name_nl ILIKE '%veneco%' OR e.primary_name_fr ILIKE '%veneco%')
+  AND e.primary_name ILIKE '%veneco%'
 LIMIT 100;
 
--- Or use a user language parameter
+-- Or use language-specific search with user preference
 SELECT
   e.enterprise_number,
-  COALESCE(e.primary_name_nl, e.primary_name_fr, e.primary_name_de) AS name,
+  CASE
+    WHEN :user_language = 'NL' AND e.primary_name_nl IS NOT NULL THEN e.primary_name_nl
+    WHEN :user_language = 'FR' AND e.primary_name_fr IS NOT NULL THEN e.primary_name_fr
+    ELSE e.primary_name  -- Fallback to primary_name
+  END AS display_name,
   e.status,
   c_jur.description AS juridical_form_desc
 FROM enterprises e
@@ -1301,7 +1356,8 @@ LIMIT 100;
 ```sql
 SELECT
   e.enterprise_number,
-  e.primary_name_nl,
+  e.primary_name,
+  e.primary_name_language,
   e.status,
   -- Address (may be NULL)
   a.zipcode,
@@ -1332,7 +1388,7 @@ WHERE e.enterprise_number = '0200.065.765';
 ```sql
 SELECT
   e.enterprise_number,
-  e.primary_name_nl,
+  e.primary_name,
   a.zipcode,
   a.municipality_nl,
   n.description_nl as activity
@@ -1357,10 +1413,9 @@ LIMIT 100;
 ```sql
 SELECT
   e.enterprise_number,
-  e.primary_name_nl,
+  e.primary_name,
   a.street_nl,
-  a.house_number,
-  e.juridical_form_desc_nl
+  a.house_number
 FROM enterprises_current e
 JOIN addresses a
   ON e.enterprise_number = a.entity_number
@@ -1368,7 +1423,7 @@ JOIN addresses a
 WHERE a.zipcode = '9000'
   AND a.municipality_nl = 'Gent'
   AND e.status = 'AC'
-ORDER BY e.primary_name_nl
+ORDER BY e.primary_name
 LIMIT 100;
 ```
 
@@ -1377,9 +1432,9 @@ LIMIT 100;
 -- Show enterprise changes over time
 SELECT
   _snapshot_date,
-  primary_name_nl,
-  status,
-  juridical_form_desc_nl
+  primary_name,
+  primary_name_language,
+  status
 FROM enterprises
 WHERE enterprise_number = '0200.065.765'
 ORDER BY _snapshot_date DESC;
@@ -1443,9 +1498,9 @@ WHERE enterprise_number = '0200.065.765'
   AND _is_current = true;
 
 -- ✅ GOOD: Prefix search (columnar min/max statistics help)
-SELECT enterprise_number, primary_name_nl
+SELECT enterprise_number, primary_name
 FROM enterprises
-WHERE primary_name_nl LIKE 'ABC%'
+WHERE primary_name LIKE 'ABC%'
   AND _is_current = true
 LIMIT 100;
 
@@ -1459,7 +1514,7 @@ WHERE e._is_current = true  -- Filter small dataset first
 
 -- ⚠️ SLOWER: Case-insensitive substring search (full scan)
 SELECT * FROM enterprises
-WHERE lower(primary_name_nl) LIKE '%veneco%'
+WHERE lower(primary_name) LIKE '%veneco%'
   AND _is_current = true;
 
 -- ⚠️ SLOWER: Multi-table JOINs with substring search
@@ -1575,13 +1630,13 @@ if (query.zipcode || query.naceCode || query.status) {
 SELECT *
 FROM enterprises e
 JOIN activities act ON e.enterprise_number = act.entity_number
-WHERE lower(e.primary_name_nl) LIKE '%test%';
+WHERE lower(e.primary_name) LIKE '%test%';
 
 -- ✅ FAST: Select needed columns, filter first, limit results
-SELECT e.enterprise_number, e.primary_name_nl, e.status
+SELECT e.enterprise_number, e.primary_name, e.status
 FROM enterprises e
 WHERE e._is_current = true
-  AND e.primary_name_nl LIKE 'Test%'  -- Prefix search
+  AND e.primary_name LIKE 'Test%'  -- Prefix search
 LIMIT 100;
 ```
 
@@ -1594,7 +1649,8 @@ LIMIT 100;
 CREATE MATERIALIZED VIEW enterprises_with_activity AS
 SELECT
   e.enterprise_number,
-  e.primary_name_nl,
+  e.primary_name,
+  e.primary_name_language,
   e.status,
   act.nace_code,
   n.description_nl
@@ -2102,10 +2158,9 @@ CREATE TABLE nace_codes (
   nace_code VARCHAR,
   description_nl VARCHAR,
   description_fr VARCHAR,
-  description_de VARCHAR,
-  description_en VARCHAR,
   PRIMARY KEY (nace_version, nace_code)
 );
+-- Note: KBO only provides NL and FR descriptions for NACE codes
 ```
 
 **Savings**: 65% storage reduction (312 GB over 2 years)
