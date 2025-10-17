@@ -5,7 +5,7 @@
 
 CREATE TABLE IF NOT EXISTS denominations (
   -- Primary key (composite to support temporal tracking)
-  id VARCHAR NOT NULL,                        -- Concatenated: entity_number_type_language_row_number
+  id VARCHAR NOT NULL,                        -- Concatenated: entity_number_type_language_hash(denomination)
   _snapshot_date DATE NOT NULL,               -- Part of PK for temporal tracking
   _extract_number INTEGER NOT NULL,           -- Part of PK for temporal tracking
 

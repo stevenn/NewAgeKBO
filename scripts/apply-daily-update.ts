@@ -17,6 +17,7 @@ config({ path: ['.env.local', '.env'] })
 import StreamZip from 'node-stream-zip'
 import { parse } from 'csv-parse/sync'
 import * as path from 'path'
+import { createHash } from 'crypto'
 import { connectMotherduck, closeMotherduck, executeQuery, executeStatement } from '../lib/motherduck'
 import {
   csvColumnToDbColumn,
@@ -45,6 +46,14 @@ interface UpdateStats {
   deletesApplied: number
   insertsApplied: number
   errors: string[]
+}
+
+/**
+ * Generate a short hash for a string (8 characters)
+ * Used to create unique IDs for denominations
+ */
+function shortHash(text: string): string {
+  return createHash('sha256').update(text).digest('hex').substring(0, 8)
 }
 
 /**
@@ -217,8 +226,10 @@ async function applyInserts(
           // id: entity_number_entity_contact_contact_type_value
           computedId = `${entityNumber}_${record['EntityContact']}_${record['ContactType']}_${record['Value']}`
         } else if (dbTableName === 'denominations') {
-          // id: entity_number_type_language_row_number (for now, use simple concat without row number)
-          computedId = `${entityNumber}_${record['TypeOfDenomination']}_${record['Language']}_1`
+          // id: entity_number_type_language_hash(denomination)
+          // Hash ensures uniqueness even if multiple denominations exist for same entity+type+language
+          const denominationHash = shortHash(record['Denomination'] || '')
+          computedId = `${entityNumber}_${record['TypeOfDenomination']}_${record['Language']}_${denominationHash}`
         }
       }
 
@@ -295,6 +306,78 @@ async function applyInserts(
 }
 
 /**
+ * Resolve primary names for enterprises
+ * Updates enterprises where primary_name is the enterprise number (temporary placeholder)
+ * to use actual names from the denominations table
+ */
+async function resolvePrimaryNames(
+  db: any,
+  metadata: Metadata
+): Promise<number> {
+  const snapshotDate = convertKboDateFormat(metadata.SnapshotDate)
+  const extractNumber = parseInt(metadata.ExtractNumber)
+
+  // Update enterprises where primary_name looks like an enterprise number
+  // Use the same language priority as initial import: NL (2) → FR (1) → Unknown (0) → DE (3) → EN (4)
+  const sql = `
+    UPDATE enterprises e
+    SET
+      primary_name = COALESCE(
+        d.denomination_nl,
+        d.denomination_fr,
+        d.denomination_unknown,
+        d.denomination_de,
+        d.denomination_en,
+        e.enterprise_number
+      ),
+      primary_name_language = COALESCE(
+        CASE WHEN d.denomination_nl IS NOT NULL THEN '2' END,
+        CASE WHEN d.denomination_fr IS NOT NULL THEN '1' END,
+        CASE WHEN d.denomination_unknown IS NOT NULL THEN '0' END,
+        CASE WHEN d.denomination_de IS NOT NULL THEN '3' END,
+        CASE WHEN d.denomination_en IS NOT NULL THEN '4' END,
+        NULL
+      ),
+      primary_name_nl = d.denomination_nl,
+      primary_name_fr = d.denomination_fr,
+      primary_name_de = d.denomination_de
+    FROM (
+      SELECT
+        entity_number,
+        MAX(CASE WHEN language = '2' AND denomination_type = '001' THEN denomination END) as denomination_nl,
+        MAX(CASE WHEN language = '1' AND denomination_type = '001' THEN denomination END) as denomination_fr,
+        MAX(CASE WHEN language = '0' AND denomination_type = '001' THEN denomination END) as denomination_unknown,
+        MAX(CASE WHEN language = '3' AND denomination_type = '001' THEN denomination END) as denomination_de,
+        MAX(CASE WHEN language = '4' AND denomination_type = '001' THEN denomination END) as denomination_en
+      FROM denominations
+      WHERE _is_current = true
+        AND entity_type = 'enterprise'
+        AND denomination_type = '001'
+      GROUP BY entity_number
+    ) d
+    WHERE e.enterprise_number = d.entity_number
+      AND e._snapshot_date = '${snapshotDate}'
+      AND e._extract_number = ${extractNumber}
+      AND e._is_current = true
+      AND e.primary_name = e.enterprise_number
+  `
+
+  await executeStatement(db, sql)
+
+  // Count how many were updated
+  const result = await executeQuery<{ count: number }>(db, `
+    SELECT COUNT(*) as count
+    FROM enterprises
+    WHERE _snapshot_date = '${snapshotDate}'
+      AND _extract_number = ${extractNumber}
+      AND _is_current = true
+      AND primary_name != enterprise_number
+  `)
+
+  return result[0]?.count || 0
+}
+
+/**
  * Process daily update ZIP file
  */
 async function processDailyUpdate(zipPath: string): Promise<UpdateStats> {
@@ -363,6 +446,25 @@ async function processDailyUpdate(zipPath: string): Promise<UpdateStats> {
         stats.tablesProcessed.push(dbTableName)
       } catch (error: any) {
         const errorMsg = `${dbTableName}: ${error.message}`
+        stats.errors.push(errorMsg)
+        console.error(`   ❌ ${errorMsg}`)
+      }
+    }
+
+    // Step 4: Resolve primary names for new enterprises
+    // This updates enterprises that were inserted with their enterprise number as primary_name
+    // to use actual names from the denominations table (if they exist)
+    if (stats.tablesProcessed.includes('enterprises') || stats.tablesProcessed.includes('denominations')) {
+      console.log('\n🔄 Resolving primary names for new enterprises...')
+      try {
+        const resolved = await resolvePrimaryNames(db, stats.metadata)
+        if (resolved > 0) {
+          console.log(`   ✓ Resolved primary names for ${resolved} enterprises`)
+        } else {
+          console.log(`   ℹ️  No new enterprises requiring name resolution`)
+        }
+      } catch (error: any) {
+        const errorMsg = `Primary name resolution: ${error.message}`
         stats.errors.push(errorMsg)
         console.error(`   ❌ ${errorMsg}`)
       }

@@ -537,7 +537,7 @@ async function initialImport() {
       `
         SELECT
           EntityNumber || '_' || TypeOfDenomination || '_' || Language || '_' ||
-          ROW_NUMBER() OVER (PARTITION BY EntityNumber, TypeOfDenomination, Language ORDER BY Denomination) as id,
+          SUBSTRING(MD5(Denomination), 1, 8) as id,
           CURRENT_DATE as _snapshot_date,
           0 as _extract_number,
           EntityNumber as entity_number,
