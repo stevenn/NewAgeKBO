@@ -232,14 +232,14 @@ export async function getDatabaseStats(
       try {
         const count = await getTableCount(db, table_name)
         stats.push({ table_name, row_count: count })
-      } catch (error) {
+      } catch {
         // Skip tables that can't be counted
         console.warn(`Warning: Could not count rows in table ${table_name}`)
       }
     }
 
     return stats
-  } catch (error) {
+  } catch {
     // If we can't query information_schema, return empty array
     return []
   }

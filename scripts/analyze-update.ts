@@ -17,6 +17,11 @@ interface Metadata {
   Version: string
 }
 
+interface MetaRecord {
+  Variable?: string
+  Value?: string
+}
+
 interface UpdateStats {
   metadata: Metadata
   deletes: { [table: string]: number }
@@ -48,14 +53,14 @@ async function analyzeUpdate(zipPath: string): Promise<UpdateStats> {
     const metaRecords = parse(metaContent.toString(), {
       columns: true,
       skip_empty_lines: true
-    })
+    }) as MetaRecord[]
 
     stats.metadata = {
-      SnapshotDate: metaRecords[0]?.Value || metaRecords.find((r: any) => r.Variable === 'SnapshotDate')?.Value,
-      ExtractTimestamp: metaRecords[1]?.Value || metaRecords.find((r: any) => r.Variable === 'ExtractTimestamp')?.Value,
-      ExtractType: metaRecords[2]?.Value || metaRecords.find((r: any) => r.Variable === 'ExtractType')?.Value,
-      ExtractNumber: metaRecords[3]?.Value || metaRecords.find((r: any) => r.Variable === 'ExtractNumber')?.Value,
-      Version: metaRecords[4]?.Value || metaRecords.find((r: any) => r.Variable === 'Version')?.Value
+      SnapshotDate: metaRecords[0]?.Value || metaRecords.find((r) => r.Variable === 'SnapshotDate')?.Value || '',
+      ExtractTimestamp: metaRecords[1]?.Value || metaRecords.find((r) => r.Variable === 'ExtractTimestamp')?.Value || '',
+      ExtractType: metaRecords[2]?.Value || metaRecords.find((r) => r.Variable === 'ExtractType')?.Value || '',
+      ExtractNumber: metaRecords[3]?.Value || metaRecords.find((r) => r.Variable === 'ExtractNumber')?.Value || '',
+      Version: metaRecords[4]?.Value || metaRecords.find((r) => r.Variable === 'Version')?.Value || ''
     }
 
     console.log(`   ✓ Snapshot Date: ${stats.metadata.SnapshotDate}`)

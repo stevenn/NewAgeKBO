@@ -9,14 +9,14 @@ async function list() {
   const db = await connectMotherduck()
   await executeQuery(db, `USE ${process.env.MOTHERDUCK_DATABASE}`)
 
-  const result = await executeQuery(db, `
+  const result = await executeQuery<{ _extract_number: number }>(db, `
     SELECT DISTINCT _extract_number
     FROM enterprises
     ORDER BY _extract_number
   `)
 
   console.log('Extract numbers in database:')
-  console.log(result.map(r => r._extract_number).join(', '))
+  console.log(result.map((r) => r._extract_number).join(', '))
 }
 
 list()

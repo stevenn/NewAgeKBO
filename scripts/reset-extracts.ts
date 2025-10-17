@@ -26,7 +26,7 @@ async function reset(targetExtract: number) {
 
   for (const table of tables) {
     // Count records from extracts > targetExtract
-    const result = await executeQuery(db, `
+    const result = await executeQuery<{ count: number }>(db, `
       SELECT COUNT(*) as count
       FROM ${table}
       WHERE _extract_number > ${targetExtract}
@@ -56,15 +56,15 @@ async function reset(targetExtract: number) {
   // Verify final state
   console.log('\n📊 Verifying database state...\n')
 
-  const extractCheck = await executeQuery(db, `
+  const extractCheck = await executeQuery<{ _extract_number: number }>(db, `
     SELECT DISTINCT _extract_number
     FROM enterprises
     ORDER BY _extract_number
   `)
 
-  console.log(`   Extract numbers remaining: ${extractCheck.map(r => r._extract_number).join(', ')}`)
+  console.log(`   Extract numbers remaining: ${extractCheck.map((r) => r._extract_number).join(', ')}`)
 
-  const currentCount = await executeQuery(db, `
+  const currentCount = await executeQuery<{ count: number }>(db, `
     SELECT COUNT(*) as count
     FROM enterprises
     WHERE _is_current = true

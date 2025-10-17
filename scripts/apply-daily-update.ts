@@ -26,6 +26,11 @@ import {
   isKboDateFormat
 } from '../lib/utils/column-mapping'
 
+interface MetaRecord {
+  Variable?: string
+  Value?: string
+}
+
 interface Metadata {
   SnapshotDate: string
   ExtractTimestamp: string
@@ -50,14 +55,14 @@ async function parseMetadata(zip: StreamZip.StreamZipAsync): Promise<Metadata> {
   const metaRecords = parse(metaContent.toString(), {
     columns: true,
     skip_empty_lines: true
-  })
+  }) as MetaRecord[]
 
   return {
-    SnapshotDate: metaRecords.find((r: any) => r.Variable === 'SnapshotDate')?.Value || metaRecords[0]?.Value,
-    ExtractTimestamp: metaRecords.find((r: any) => r.Variable === 'ExtractTimestamp')?.Value || metaRecords[1]?.Value,
-    ExtractType: metaRecords.find((r: any) => r.Variable === 'ExtractType')?.Value || metaRecords[2]?.Value,
-    ExtractNumber: metaRecords.find((r: any) => r.Variable === 'ExtractNumber')?.Value || metaRecords[3]?.Value,
-    Version: metaRecords.find((r: any) => r.Variable === 'Version')?.Value || metaRecords[4]?.Value
+    SnapshotDate: metaRecords.find((r) => r.Variable === 'SnapshotDate')?.Value || metaRecords[0]?.Value || '',
+    ExtractTimestamp: metaRecords.find((r) => r.Variable === 'ExtractTimestamp')?.Value || metaRecords[1]?.Value || '',
+    ExtractType: metaRecords.find((r) => r.Variable === 'ExtractType')?.Value || metaRecords[2]?.Value || '',
+    ExtractNumber: metaRecords.find((r) => r.Variable === 'ExtractNumber')?.Value || metaRecords[3]?.Value || '',
+    Version: metaRecords.find((r) => r.Variable === 'Version')?.Value || metaRecords[4]?.Value || ''
   }
 }
 
@@ -80,7 +85,7 @@ async function applyDeletes(
     const records = parse(content.toString(), {
       columns: true,
       skip_empty_lines: true
-    })
+    }) as Record<string, string>[]
 
     if (records.length === 0) {
       console.log(`   ℹ️  ${dbTableName}: No deletes`)
@@ -130,7 +135,7 @@ async function applyInserts(
     const records = parse(content.toString(), {
       columns: true,
       skip_empty_lines: true
-    })
+    }) as Record<string, string>[]
 
     if (records.length === 0) {
       console.log(`   ℹ️  ${dbTableName}: No inserts`)
@@ -138,7 +143,7 @@ async function applyInserts(
     }
 
     // Deduplicate records based on all fields (KBO sometimes sends duplicates)
-    const uniqueRecords: any[] = []
+    const uniqueRecords: Record<string, string>[] = []
     const seen = new Set<string>()
 
     for (const record of records) {

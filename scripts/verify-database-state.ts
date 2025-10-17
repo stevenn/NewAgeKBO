@@ -13,19 +13,19 @@ async function verify() {
   console.log('='.repeat(60))
 
   // Extract numbers present
-  const extractCheck = await executeQuery(db, `
+  const extractCheck = await executeQuery<{ _extract_number: number }>(db, `
     SELECT DISTINCT _extract_number
     FROM enterprises
     ORDER BY _extract_number
   `)
-  console.log('Extract numbers present:', extractCheck.map(r => r._extract_number).join(', '))
+  console.log('Extract numbers present:', extractCheck.map((r) => r._extract_number).join(', '))
 
   // Latest extract
   const latestExtract = extractCheck[extractCheck.length - 1]._extract_number
   console.log(`Latest extract: ${latestExtract}`)
 
   // Current snapshot date
-  const snapshotCheck = await executeQuery(db, `
+  const snapshotCheck = await executeQuery<{ _snapshot_date: string }>(db, `
     SELECT DISTINCT _snapshot_date
     FROM enterprises
     WHERE _extract_number = ${latestExtract}
@@ -40,7 +40,7 @@ async function verify() {
   const tables = ['enterprises', 'establishments', 'activities', 'addresses', 'branches', 'contacts', 'denominations']
 
   for (const table of tables) {
-    const result = await executeQuery(db, `
+    const result = await executeQuery<{ count: number }>(db, `
       SELECT COUNT(*) as count
       FROM ${table}
       WHERE _is_current = true
@@ -55,7 +55,7 @@ async function verify() {
 
   let grandTotal = 0
   for (const table of tables) {
-    const result = await executeQuery(db, `
+    const result = await executeQuery<{ count: number }>(db, `
       SELECT COUNT(*) as count
       FROM ${table}
     `)
@@ -72,7 +72,7 @@ async function verify() {
   console.log('='.repeat(60))
 
   for (const extract of extractCheck) {
-    const result = await executeQuery(db, `
+    const result = await executeQuery<{ count: number }>(db, `
       SELECT COUNT(*) as count
       FROM enterprises
       WHERE _extract_number = ${extract._extract_number}

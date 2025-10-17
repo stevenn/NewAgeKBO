@@ -39,7 +39,7 @@ async function deleteExtracts(startExtract: number, endExtract?: number) {
 
   // Step 1: Delete records from target extracts
   for (const table of tables) {
-    const result = await executeQuery(db, `
+    const result = await executeQuery<{ count: number }>(db, `
       SELECT COUNT(*) as count
       FROM ${table}
       WHERE _extract_number IN (${extracts.join(',')})
@@ -59,7 +59,7 @@ async function deleteExtracts(startExtract: number, endExtract?: number) {
   }
 
   // Step 2: Find the snapshot date(s) of the deleted extracts to revert historical markings
-  const snapshotDates = await executeQuery(db, `
+  const snapshotDates = await executeQuery<{ _snapshot_date: string }>(db, `
     SELECT DISTINCT _snapshot_date
     FROM enterprises
     WHERE _extract_number IN (SELECT MAX(_extract_number) FROM enterprises WHERE _extract_number < ${startExtract})
@@ -75,7 +75,7 @@ async function deleteExtracts(startExtract: number, endExtract?: number) {
 
     // Get the date just before the first deleted extract
     const beforeExtract = startExtract - 1
-    const beforeSnapshotResult = await executeQuery(db, `
+    const beforeSnapshotResult = await executeQuery<{ _snapshot_date: string }>(db, `
       SELECT DISTINCT _snapshot_date
       FROM enterprises
       WHERE _extract_number = ${beforeExtract}
@@ -89,7 +89,7 @@ async function deleteExtracts(startExtract: number, endExtract?: number) {
 
       for (const table of tables) {
         // Find records from earlier extracts that were marked historical by deleted extracts
-        const result = await executeQuery(db, `
+        const result = await executeQuery<{ count: number }>(db, `
           SELECT COUNT(*) as count
           FROM ${table}
           WHERE _extract_number < ${startExtract}
@@ -115,13 +115,13 @@ async function deleteExtracts(startExtract: number, endExtract?: number) {
   // Step 3: Verify final state
   console.log('\n📊 Verifying database state...\n')
 
-  const extractCheck = await executeQuery(db, `
+  const extractCheck = await executeQuery<{ _extract_number: number }>(db, `
     SELECT DISTINCT _extract_number
     FROM enterprises
     ORDER BY _extract_number
   `)
 
-  console.log(`   Extract numbers remaining: ${extractCheck.map(r => r._extract_number).join(', ')}`)
+  console.log(`   Extract numbers remaining: ${extractCheck.map((r) => r._extract_number).join(', ')}`)
 
   const latestExtract = extractCheck.length > 0 ? extractCheck[extractCheck.length - 1]._extract_number : 'none'
   console.log(`   Latest extract: ${latestExtract}`)

@@ -10,6 +10,19 @@ config({ path: ['.env.local', '.env'] })
 
 import { connectMotherduck, closeMotherduck } from '../lib/motherduck'
 
+interface NaceVersionRow {
+  nace_version: string
+  count: number
+  percentage: number
+}
+
+interface ActivityRow {
+  entity_number: string
+  nace_version: string
+  nace_code: string
+  classification: string
+}
+
 async function checkNaceVersions() {
   console.log('\n🔍 Checking NACE version distribution in Motherduck...\n')
 
@@ -18,30 +31,27 @@ async function checkNaceVersions() {
   try {
     // Query 1: NACE version distribution in activities
     console.log('📊 NACE Versions in Activities Table:')
-    const resultPromise = db.all(`
-      SELECT
-        nace_version,
-        COUNT(*) as count,
-        ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 2) as percentage
-      FROM activities
-      WHERE _is_current = true
-      GROUP BY nace_version
-      ORDER BY nace_version DESC
-    `)
-
-    const result = await resultPromise
+    const result: NaceVersionRow[] = await new Promise((resolve, reject) => {
+      db.all(`
+        SELECT
+          nace_version,
+          COUNT(*) as count,
+          ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 2) as percentage
+        FROM activities
+        WHERE _is_current = true
+        GROUP BY nace_version
+        ORDER BY nace_version DESC
+      `, (err, rows) => {
+        if (err) reject(err)
+        else resolve(rows as NaceVersionRow[])
+      })
+    })
 
     console.log('\n   Version | Count      | Percentage')
     console.log('   --------|------------|------------')
 
-    if (result && Array.isArray(result)) {
+    if (result && result.length > 0) {
       for (const row of result) {
-        console.log(`   ${row.nace_version}    | ${String(row.count).padStart(10)} | ${String(row.percentage).padStart(6)}%`)
-      }
-    } else if (result) {
-      // Single row result
-      const rows = [result]
-      for (const row of rows) {
         console.log(`   ${row.nace_version}    | ${String(row.count).padStart(10)} | ${String(row.percentage).padStart(6)}%`)
       }
     } else {
@@ -50,17 +60,22 @@ async function checkNaceVersions() {
 
     // Query 2: Sample activities with NACE 2025
     console.log('\n\n📝 Sample Activities with NACE 2025:')
-    const sample2025 = await db.all(`
-      SELECT
-        entity_number,
-        nace_version,
-        nace_code,
-        classification
-      FROM activities
-      WHERE _is_current = true
-        AND nace_version = '2025'
-      LIMIT 5
-    `)
+    const sample2025: ActivityRow[] = await new Promise((resolve, reject) => {
+      db.all(`
+        SELECT
+          entity_number,
+          nace_version,
+          nace_code,
+          classification
+        FROM activities
+        WHERE _is_current = true
+          AND nace_version = '2025'
+        LIMIT 5
+      `, (err, rows) => {
+        if (err) reject(err)
+        else resolve(rows as ActivityRow[])
+      })
+    })
 
     if (sample2025.length > 0) {
       for (const row of sample2025) {
@@ -72,17 +87,22 @@ async function checkNaceVersions() {
 
     // Query 3: Sample activities with NACE 2008
     console.log('\n📝 Sample Activities with NACE 2008:')
-    const sample2008 = await db.all(`
-      SELECT
-        entity_number,
-        nace_version,
-        nace_code,
-        classification
-      FROM activities
-      WHERE _is_current = true
-        AND nace_version = '2008'
-      LIMIT 5
-    `)
+    const sample2008: ActivityRow[] = await new Promise((resolve, reject) => {
+      db.all(`
+        SELECT
+          entity_number,
+          nace_version,
+          nace_code,
+          classification
+        FROM activities
+        WHERE _is_current = true
+          AND nace_version = '2008'
+        LIMIT 5
+      `, (err, rows) => {
+        if (err) reject(err)
+        else resolve(rows as ActivityRow[])
+      })
+    })
 
     if (sample2008.length > 0) {
       for (const row of sample2008) {
@@ -93,9 +113,9 @@ async function checkNaceVersions() {
     }
 
     // Analysis
-    const has2025 = result.find(r => r.nace_version === '2025')
-    const has2008 = result.find(r => r.nace_version === '2008')
-    const has2003 = result.find(r => r.nace_version === '2003')
+    const has2025 = result.find((r) => r.nace_version === '2025')
+    const has2008 = result.find((r) => r.nace_version === '2008')
+    const has2003 = result.find((r) => r.nace_version === '2003')
 
     console.log('\n' + '='.repeat(60))
     console.log('📊 ANALYSIS')

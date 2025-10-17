@@ -27,6 +27,11 @@ import * as path from 'path'
 import { parse } from 'csv-parse/sync'
 import { connectMotherduck, closeMotherduck } from '../lib/motherduck'
 
+interface MetaRecord {
+  Variable?: string
+  Value?: string
+}
+
 interface Metadata {
   SnapshotDate: string
   ExtractTimestamp: string
@@ -52,14 +57,14 @@ async function parseMetadata(dataDir: string): Promise<Metadata> {
   const metaRecords = parse(metaContent, {
     columns: true,
     skip_empty_lines: true
-  })
+  }) as MetaRecord[]
 
   return {
-    SnapshotDate: metaRecords.find((r: any) => r.Variable === 'SnapshotDate')?.Value || metaRecords[0]?.Value,
-    ExtractTimestamp: metaRecords.find((r: any) => r.Variable === 'ExtractTimestamp')?.Value || metaRecords[1]?.Value,
-    ExtractType: metaRecords.find((r: any) => r.Variable === 'ExtractType')?.Value || metaRecords[2]?.Value,
-    ExtractNumber: metaRecords.find((r: any) => r.Variable === 'ExtractNumber')?.Value || metaRecords[3]?.Value,
-    Version: metaRecords.find((r: any) => r.Variable === 'Version')?.Value || metaRecords[4]?.Value
+    SnapshotDate: metaRecords.find((r) => r.Variable === 'SnapshotDate')?.Value || metaRecords[0]?.Value || '',
+    ExtractTimestamp: metaRecords.find((r) => r.Variable === 'ExtractTimestamp')?.Value || metaRecords[1]?.Value || '',
+    ExtractType: metaRecords.find((r) => r.Variable === 'ExtractType')?.Value || metaRecords[2]?.Value || '',
+    ExtractNumber: metaRecords.find((r) => r.Variable === 'ExtractNumber')?.Value || metaRecords[3]?.Value || '',
+    Version: metaRecords.find((r) => r.Variable === 'Version')?.Value || metaRecords[4]?.Value || ''
   }
 }
 
@@ -147,7 +152,7 @@ async function importFullSnapshot(
         columns: true,
         skip_empty_lines: true,
         relax_quotes: true
-      })
+      }) as Record<string, string>[]
 
       if (records.length === 0) {
         console.log(`   ⚠️  ${csvFile}: No records found`)
