@@ -1,7 +1,31 @@
-# KBO Open Data - Revised Schema Design
+# KBO Open Data - Implementation Guide
 
-**Date**: 2025-10-13
-**Based on**: Data analysis findings + Parquet compression tests
+**Last Updated**: 2025-10-17
+**Status**: Phase 1 Complete ✅ | Phase 2 In Progress
+
+---
+
+## Implementation Status
+
+### ✅ Completed (Phase 1)
+- [x] Database schema with 11 tables and composite primary keys
+- [x] Initial import pipeline (46.8M rows in 21 minutes)
+- [x] Daily update pipeline with ZIP processing
+- [x] Temporal tracking with `(id, _snapshot_date, _extract_number)` pattern
+- [x] Column mapping library (CSV PascalCase → Database snake_case)
+- [x] All core utilities, validation, and error handling
+- [x] Tested with real data (Extracts 140 & 141)
+
+### 🔄 In Progress (Phase 2)
+- [ ] Monthly import script (`scripts/monthly-import.ts`)
+- [ ] 24-month retention policy implementation
+- [ ] Automated testing for pipeline
+
+### 📅 Next (Phase 3)
+- [ ] Next.js web application
+- [ ] Admin UI for job monitoring
+- [ ] Vercel cron for daily updates
+- [ ] API endpoints for data access
 
 ---
 
@@ -201,14 +225,16 @@ function getEnterpriseName(enterprise: Enterprise, userLang: 'NL' | 'FR' | 'DE' 
 
 ### Code Descriptions Coverage
 
-**All code categories support 4 languages:**
-- JuridicalForm: NL ✓ FR ✓ DE ✓ EN ✗ (usually only NL/FR/DE)
-- JuridicalSituation: NL ✓ FR ✓ DE ✓ EN ✗
-- ActivityGroup: NL ✓ FR ✓ DE ✗ EN ✗ (usually only NL/FR)
-- TypeOfAddress: NL ✓ FR ✓ DE ✗ EN ✗
-- NACE codes: NL ✓ FR ✓ DE ✓ EN ✓ (fully multilingual)
+**Code categories language support:**
+- JuridicalForm: NL ✓ FR ✓ DE ✓ (stored in codes table)
+- JuridicalSituation: NL ✓ FR ✓ DE ✓ (stored in codes table)
+- ActivityGroup: NL ✓ FR ✓ (stored in codes table)
+- TypeOfAddress: NL ✓ FR ✓ (stored in codes table)
+- **NACE codes: NL ✓ FR ✓ ONLY** (stored in nace_codes table)
 
-**Fallback**: If user's language not available, fall back to NL → FR → first available.
+**Important**: Despite what source data might contain, our schema only stores **NL, FR, and DE** in the `codes` table, and only **NL and FR** for NACE codes. English (EN) is NOT stored as KBO Open Data does not consistently provide English translations.
+
+**Fallback**: If user's language not available, fall back to NL → FR → DE (for codes) or NL → FR (for NACE codes).
 
 ---
 
@@ -230,12 +256,12 @@ CREATE TABLE enterprises (
   start_date DATE,
 
   -- Primary denomination (denormalized - always exists, 100% coverage)
+  -- Note: All enterprises have a legal name (Type 001), so no need to store type
   primary_name VARCHAR NOT NULL,              -- Primary name (any language, never NULL)
   primary_name_language VARCHAR,              -- Language code: 0=Unknown, 1=FR, 2=NL, 3=DE, 4=EN
   primary_name_nl VARCHAR,                    -- Dutch version (NULL if not available)
   primary_name_fr VARCHAR,                    -- French version (NULL if not available)
   primary_name_de VARCHAR,                    -- German version (NULL if not available)
-  primary_name_type VARCHAR,                  -- 001, 002, 003, 004
 
   -- Temporal tracking
   _snapshot_date DATE,
@@ -272,11 +298,11 @@ CREATE TABLE establishments (
 #### 3. Denominations (All Names - Link Table)
 ```sql
 CREATE TABLE denominations (
-  id UUID PRIMARY KEY,
+  id VARCHAR PRIMARY KEY,  -- Concatenated: entity_number_type_language_row_number
   entity_number VARCHAR NOT NULL,  -- enterprise or establishment number
   entity_type VARCHAR NOT NULL,  -- 'enterprise' or 'establishment'
   denomination_type VARCHAR NOT NULL,  -- 001, 002, 003, 004
-  language VARCHAR NOT NULL,  -- 0=unknown, 1=FR, 2=NL, 3=DE, 4=EN
+  language VARCHAR NOT NULL,  -- 0=Unknown, 1=FR, 2=NL, 3=DE, 4=EN
   denomination VARCHAR NOT NULL,
 
   -- Temporal tracking
@@ -294,7 +320,7 @@ CREATE TABLE denominations (
 #### 4. Addresses (Link Table)
 ```sql
 CREATE TABLE addresses (
-  id UUID PRIMARY KEY,
+  id VARCHAR PRIMARY KEY,  -- Concatenated: entity_number_type_of_address
   entity_number VARCHAR NOT NULL,
   entity_type VARCHAR NOT NULL,  -- 'enterprise' or 'establishment'
   type_of_address VARCHAR NOT NULL,  -- REGO, BAET, ABBR, OBAD
@@ -347,7 +373,7 @@ CREATE TABLE nace_codes (
 #### 6. Activities (Link Table - CRITICAL)
 ```sql
 CREATE TABLE activities (
-  id UUID PRIMARY KEY,
+  id VARCHAR PRIMARY KEY,  -- Concatenated: entity_number_group_version_code_classification
   entity_number VARCHAR NOT NULL,
   entity_type VARCHAR NOT NULL,  -- 'enterprise' or 'establishment'
   activity_group VARCHAR NOT NULL,  -- 001-007
@@ -378,9 +404,10 @@ CREATE TABLE activities (
 #### 7. Contacts (Link Table)
 ```sql
 CREATE TABLE contacts (
-  id UUID PRIMARY KEY,
+  id VARCHAR PRIMARY KEY,  -- Concatenated: entity_number_entity_contact_contact_type_value
   entity_number VARCHAR NOT NULL,
   entity_type VARCHAR NOT NULL,  -- 'enterprise' or 'establishment'
+  entity_contact VARCHAR NOT NULL,  -- ENT, ESTB, or BRANCH
   contact_type VARCHAR NOT NULL,  -- TEL, EMAIL, WEB, etc.
   contact_value VARCHAR NOT NULL,
 
@@ -391,22 +418,20 @@ CREATE TABLE contacts (
 );
 ```
 
+**Field Descriptions**:
+- `entity_contact`: Specifies which part of the entity this contact belongs to
+  - **ENT**: Enterprise-level contact
+  - **ESTB**: Establishment-level contact
+  - **BRANCH**: Branch-level contact
+- `contact_type`: Type of contact method (TEL, EMAIL, WEB, etc.)
+- `contact_value`: The actual contact information (phone number, email address, URL)
+
 #### 8. Branches (Foreign Entities)
 ```sql
 CREATE TABLE branches (
   id VARCHAR PRIMARY KEY,
   enterprise_number VARCHAR,
   start_date DATE,
-  branch_name VARCHAR,
-
-  -- Address (denormalized - branches are rare, only 7k)
-  street_nl VARCHAR,
-  street_fr VARCHAR,
-  house_number VARCHAR,
-  box VARCHAR,
-  zipcode VARCHAR,
-  municipality_nl VARCHAR,
-  municipality_fr VARCHAR,
 
   -- Temporal tracking
   _snapshot_date DATE,
@@ -415,7 +440,7 @@ CREATE TABLE branches (
 );
 ```
 
-**Rationale**: Only 7,326 branches total, so denormalization is fine.
+**Rationale**: KBO Open Data only provides minimal branch information (ID, enterprise link, start date). Branch names and addresses are NOT available in the dataset.
 
 #### 9. Code Lookup Table (Static)
 ```sql
@@ -1195,7 +1220,6 @@ interface Denomination {
 function selectPrimaryDenomination(denominations: Denomination[]): {
   primary_name_nl: string | null;
   primary_name_fr: string | null;
-  primary_name_type: string;
 } {
   // Priority order
   const priorities = [
@@ -1207,7 +1231,6 @@ function selectPrimaryDenomination(denominations: Denomination[]): {
 
   let primaryNL = null;
   let primaryFR = null;
-  let primaryType = null;
 
   for (const priority of priorities) {
     const match = denominations.find(
@@ -1216,7 +1239,6 @@ function selectPrimaryDenomination(denominations: Denomination[]): {
     if (match) {
       if (match.Language === '2') primaryNL = match.Denomination;
       if (match.Language === '0') primaryFR = match.Denomination;
-      primaryType = match.TypeOfDenomination;
       break;
     }
   }
@@ -1226,11 +1248,10 @@ function selectPrimaryDenomination(denominations: Denomination[]): {
     const fallback = denominations[0];
     if (fallback) {
       primaryNL = fallback.Denomination;
-      primaryType = fallback.TypeOfDenomination;
     }
   }
 
-  return { primary_name_nl: primaryNL, primary_name_fr: primaryFR, primary_name_type: primaryType };
+  return { primary_name_nl: primaryNL, primary_name_fr: primaryFR };
 }
 ```
 
@@ -1268,7 +1289,6 @@ INSERT INTO enterprises (
   primary_name_nl,
   primary_name_fr,
   primary_name_de,
-  primary_name_type,
   ...
 )
 SELECT
@@ -1294,7 +1314,6 @@ SELECT
   MAX(CASE WHEN d.Language = '2' THEN d.Denomination END) as primary_name_nl,
   MAX(CASE WHEN d.Language = '1' THEN d.Denomination END) as primary_name_fr,
   MAX(CASE WHEN d.Language = '3' THEN d.Denomination END) as primary_name_de,
-  MAX(d.TypeOfDenomination) as primary_name_type,
   ...
 FROM read_csv('enterprise.csv', AUTO_DETECT=TRUE) e
 LEFT JOIN ranked_denominations d

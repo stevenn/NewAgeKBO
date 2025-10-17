@@ -6,8 +6,10 @@ A modern Next.js platform for managing and querying Belgian KBO (Crossroads Bank
 
 ## 🎯 Project Status
 
-**Phase**: Design & Analysis Complete ✅
-**Next**: Implementation (Week 1 - Setup & POC)
+**Phase**: Phase 1 Complete ✅ | Phase 2 In Progress
+**Current**: Data pipeline operational, Web app next
+**Last Import**: Extract #140 (2025-10-04) - 46.8M rows
+**Last Update**: Extract #141 (2025-10-05) - 11,131 changes
 
 ---
 
@@ -15,20 +17,51 @@ A modern Next.js platform for managing and querying Belgian KBO (Crossroads Bank
 
 ### Prerequisites
 - Node.js 18+
-- DuckDB CLI (`brew install duckdb`)
-- Motherduck account (for cloud deployment)
-- KBO Open Data access credentials
+- Motherduck account with token
+- KBO Open Data files (download from portal)
 
-### Local Development
+### Setup
 ```bash
 # Install dependencies
 npm install
 
-# Run data analysis (requires sample data)
-duckdb :memory: < analysis-queries.sql
+# Configure Motherduck
+cp .env .env.local
+# Edit .env.local with your MOTHERDUCK_TOKEN
 
-# Test Parquet compression
-./test-parquet-compression.sh
+# Create schema
+npx tsx scripts/create-schema.ts
+
+# Run initial import (extract KBO ZIP first)
+npx tsx scripts/initial-import.ts ./path/to/KboOpenData_0xxx_Full
+
+# Apply daily update
+npx tsx scripts/apply-daily-update.ts ./path/to/update.zip
+```
+
+### Available Scripts
+```bash
+# Schema management
+npx tsx scripts/create-schema.ts         # Create all tables
+npx tsx scripts/verify-schema.ts         # Verify schema
+npx tsx scripts/cleanup-data.ts          # Drop all data (keep schema)
+
+# Data operations
+npx tsx scripts/initial-import.ts <path> # Initial full import
+npx tsx scripts/apply-daily-update.ts <zip> # Apply daily update
+npx tsx scripts/apply-monthly-snapshot.ts   # Mark current as historical
+npx tsx scripts/batch-apply-updates.ts [dir] # Apply all updates in sequence
+
+# Extract management
+npx tsx scripts/list-extracts.ts            # List all extract numbers in DB
+npx tsx scripts/verify-database-state.ts    # Comprehensive database state check
+npx tsx scripts/reset-extracts.ts <N>       # Reset database to extract N
+npx tsx scripts/delete-extracts.ts <N> [M]  # Delete extract N or range N-M
+npx tsx scripts/analyze-update.ts <zip>     # Analyze update ZIP contents
+npx tsx scripts/check-nace-versions.ts      # Check NACE version distribution
+
+# Utilities
+npx tsx scripts/test-motherduck-connection.ts # Test Motherduck connection
 ```
 
 ---
@@ -43,6 +76,40 @@ duckdb :memory: < analysis-queries.sql
 ### Reference
 - **[specs/KBOCookbook_EN.md](specs/KBOCookbook_EN.md)** - Official KBO Open Data specification (English)
 - **[specs/KBOCookbook_NL.md](specs/KBOCookbook_NL.md)** - Official KBO Open Data specification (Dutch)
+
+---
+
+## ✨ What's Working Now
+
+### Data Pipeline (Fully Operational)
+✅ **Initial Import**: Load 46.8M rows from KBO full dataset in ~21 minutes
+✅ **Daily Updates**: Apply incremental changes (<10K changes in <10 seconds)
+✅ **Temporal Tracking**: Full history preserved with composite primary keys
+✅ **ZIP Processing**: Direct CSV reading from ZIP files (no extraction)
+✅ **Column Mapping**: Automatic PascalCase → snake_case conversion
+✅ **Data Quality**: Computed IDs, entity types, date conversions
+
+### Database (Motherduck)
+✅ **11 Tables**: Enterprises, establishments, activities, addresses, contacts, denominations, branches, codes, NACE codes, import jobs
+✅ **Composite Primary Keys**: `(id, _snapshot_date, _extract_number)` for temporal versioning
+✅ **Link Tables**: Activities (36M), addresses (2.8M), contacts (0.7M), denominations (3.3M)
+✅ **Denormalized Primary Names**: Fast enterprise search by name
+✅ **Multi-Language Support**: NL/FR/DE in addresses, codes, names
+
+### Performance
+- **Import Speed**: 46.8M rows in 1,239 seconds (37,800 rows/sec)
+- **Update Speed**: 11,131 changes in <10 seconds
+- **Storage**: ~100MB per snapshot (Parquet ZSTD expected)
+- **Bottleneck**: Activities table (36M rows = 76% of import time)
+
+### Test Results
+```
+✅ Extract 140 (Full): 46,796,881 rows imported
+✅ Extract 141 (Update): 11,131 changes applied
+✅ All temporal tracking working
+✅ No data integrity errors
+✅ Delete-then-insert pattern preserves history
+```
 
 ---
 
@@ -177,18 +244,35 @@ ORDER BY _snapshot_date DESC;
 
 ```
 NewAgeKBO/
+├── lib/
+│   ├── motherduck/          # Motherduck connection and query utilities
+│   ├── sql/schema/          # SQL schema files (11 tables)
+│   ├── types/               # TypeScript type definitions
+│   ├── utils/               # Shared utilities (column mapping, dates)
+│   ├── validation/          # Enterprise number, meta.csv validation
+│   └── errors/              # Error handling
+├── scripts/
+│   ├── initial-import.ts         # Initial full import (46.8M rows)
+│   ├── apply-daily-update.ts     # Daily incremental updates
+│   ├── apply-monthly-snapshot.ts # Monthly snapshot rotation
+│   ├── batch-apply-updates.ts    # Batch apply all updates
+│   ├── create-schema.ts          # Schema creation
+│   ├── cleanup-data.ts           # Data cleanup
+│   ├── reset-extracts.ts         # Reset to specific extract
+│   ├── delete-extracts.ts        # Delete extract(s)
+│   ├── list-extracts.ts          # List extracts in DB
+│   ├── verify-database-state.ts  # Comprehensive state check
+│   ├── analyze-update.ts         # Analyze update ZIP
+│   └── *.ts                      # Other utility scripts
 ├── docs/
 │   ├── IMPLEMENTATION_GUIDE.md    # Complete implementation reference
-│   ├── DATA_ANALYSIS.md           # Data analysis findings
-│   └── old_analysis/              # Historical analysis artifacts
+│   └── DATA_ANALYSIS.md           # Data analysis findings
 ├── specs/
 │   ├── KBOCookbook_EN.md          # Official KBO specification
-│   └── KBOCookbook_NL.md          # Official KBO specification (Dutch)
+│   └── KBOCookbook_NL.md          # Dutch version
 ├── sampledata/
-│   ├── KboOpenData_0140_*/        # Full dataset sample (NOT in git)
-│   └── KboOpenData_0147_*/        # Update dataset sample (in git)
-├── analysis-queries.sql           # DuckDB queries for data analysis
-├── test-parquet-compression.sh    # Compression benchmark script
+│   ├── KboOpenData_0140_*/        # Full dataset (NOT in git)
+│   └── KboOpenData_0141_*.zip     # Update files (in git)
 ├── CLAUDE.md                      # Instructions for Claude Code
 └── README.md                      # This file
 ```
@@ -204,26 +288,33 @@ NewAgeKBO/
 - [x] Storage strategy (2.5 GB for 2 years)
 - [x] Primary selection rules defined
 
-### 🔄 Phase 1: Foundation & Initial Import (Week 1-2)
-- [ ] Set up Motherduck account and connection
-- [ ] Create schema (all tables) in Motherduck
-- [ ] Implement primary selection logic (SQL + TypeScript)
-- [ ] **Perform initial full import** to populate Motherduck
-- [ ] Verify temporal tracking and data integrity
+### ✅ Phase 1: Foundation & Initial Import (Complete)
+- [x] Set up Motherduck account and connection
+- [x] Create schema (11 tables) in Motherduck with composite PKs
+- [x] Implement primary selection logic (SQL + TypeScript)
+- [x] **Perform initial full import** - 46.8M rows in 21 minutes ✅
+- [x] Verify temporal tracking and data integrity
+- [x] Daily update pipeline with ZIP processing ✅
+- [x] Column mapping library (CSV → Database)
+- [x] All core utilities and error handling
 
-### 📅 Phase 2: Monthly Full Import Pipeline (Week 3-4)
-- [ ] Build CSV → DuckDB → Parquet transformation pipeline (local)
-- [ ] Implement link table transformations
-- [ ] Implement snapshot rotation logic (`_is_current` updates)
-- [ ] Test full re-import with sample data
-- [ ] Benchmark with full dataset
+### 🔄 Phase 2: Monthly Full Import Pipeline (In Progress)
+- [x] Build CSV → DuckDB transformation pipeline (local)
+- [x] Implement link table transformations
+- [x] Implement snapshot rotation logic (`_is_current` updates)
+- [x] Test full re-import with sample data (Extract 140)
+- [x] Benchmark with full dataset (21 minutes, 46.8M rows)
+- [ ] **TODO**: Create monthly-import.ts script
+- [ ] **TODO**: Implement 24-month retention policy
+- [ ] **TODO**: Automated testing for pipeline
 
-### 🌐 Phase 3: Daily Update Pipeline & Web App (Week 5-7)
-- [ ] Initialize Next.js app
-- [ ] Build daily update cron job (Vercel, 12:00 CET)
-- [ ] Implement delete/insert logic for incremental updates
-- [ ] API routes for Motherduck queries
-- [ ] Admin UI for job monitoring
+### 📅 Phase 3: Web App & Admin UI (Next)
+- [ ] Initialize Next.js 15 app with TypeScript
+- [ ] Set up Clerk authentication (admin role)
+- [ ] Build admin dashboard (import jobs, system status)
+- [ ] Deploy daily update cron to Vercel (12:00 CET)
+- [ ] API routes for data queries
+- [ ] Manual trigger UI for updates
 
 ### 🎨 Phase 4: Features (Week 8-10)
 - [ ] Data browser with search

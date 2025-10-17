@@ -3,8 +3,10 @@
 -- Most fields stored as codes (JOIN to codes table for descriptions)
 
 CREATE TABLE IF NOT EXISTS establishments (
-  -- Primary key
-  establishment_number VARCHAR PRIMARY KEY,
+  -- Primary key (composite to support temporal tracking)
+  establishment_number VARCHAR NOT NULL,
+  _snapshot_date DATE NOT NULL,               -- Part of PK for temporal tracking
+  _extract_number INTEGER NOT NULL,           -- Part of PK for temporal tracking
 
   -- Foreign key to enterprise
   enterprise_number VARCHAR NOT NULL,
@@ -17,9 +19,10 @@ CREATE TABLE IF NOT EXISTS establishments (
   commercial_name_language VARCHAR,           -- Language code: 0=Unknown, 1=FR, 2=NL, 3=DE, 4=EN
 
   -- Temporal tracking
-  _snapshot_date DATE NOT NULL,
-  _extract_number INTEGER NOT NULL,
-  _is_current BOOLEAN NOT NULL
+  _is_current BOOLEAN NOT NULL,               -- TRUE for current, FALSE for historical
+
+  -- Composite primary key to support temporal tracking
+  PRIMARY KEY (establishment_number, _snapshot_date, _extract_number)
 );
 
 -- Comments for documentation

@@ -416,6 +416,8 @@ async function initialImport() {
       `
         SELECT
           e.EnterpriseNumber as enterprise_number,
+          CURRENT_DATE as _snapshot_date,
+          0 as _extract_number,
           e.Status as status,
           e.JuridicalSituation as juridical_situation,
           e.TypeOfEnterprise as type_of_enterprise,
@@ -445,9 +447,6 @@ async function initialImport() {
           MAX(CASE WHEN d.Language = '2' THEN d.Denomination END) as primary_name_nl,
           MAX(CASE WHEN d.Language = '1' THEN d.Denomination END) as primary_name_fr,
           MAX(CASE WHEN d.Language = '3' THEN d.Denomination END) as primary_name_de,
-          MAX(d.TypeOfDenomination) as primary_name_type,
-          CURRENT_DATE as _snapshot_date,
-          0 as _extract_number,
           TRUE as _is_current
         FROM staged_enterprises e
         LEFT JOIN ranked_denominations d
@@ -498,6 +497,8 @@ async function initialImport() {
       `
         SELECT
           e.EstablishmentNumber as establishment_number,
+          CURRENT_DATE as _snapshot_date,
+          0 as _extract_number,
           e.EnterpriseNumber as enterprise_number,
           TRY_CAST(e.StartDate AS DATE) as start_date,
           -- Extract primary commercial name (Type 003) - Priority: Dutch -> French -> Unknown -> German -> English
@@ -516,8 +517,6 @@ async function initialImport() {
             MAX(CASE WHEN d.Language = '3' AND d.TypeOfDenomination = '003' THEN '3' END),
             MAX(CASE WHEN d.Language = '4' AND d.TypeOfDenomination = '003' THEN '4' END)
           ) as commercial_name_language,
-          CURRENT_DATE as _snapshot_date,
-          0 as _extract_number,
           TRUE as _is_current
         FROM staged_establishments e
         LEFT JOIN staged_denominations d
@@ -539,6 +538,8 @@ async function initialImport() {
         SELECT
           EntityNumber || '_' || TypeOfDenomination || '_' || Language || '_' ||
           ROW_NUMBER() OVER (PARTITION BY EntityNumber, TypeOfDenomination, Language ORDER BY Denomination) as id,
+          CURRENT_DATE as _snapshot_date,
+          0 as _extract_number,
           EntityNumber as entity_number,
           CASE
             WHEN EntityNumber LIKE '2.%' THEN 'establishment'
@@ -547,8 +548,6 @@ async function initialImport() {
           TypeOfDenomination as denomination_type,
           Language as language,
           Denomination as denomination,
-          CURRENT_DATE as _snapshot_date,
-          0 as _extract_number,
           TRUE as _is_current
         FROM staged_denominations
       `,
@@ -565,6 +564,8 @@ async function initialImport() {
       `
         SELECT
           EntityNumber || '_' || TypeOfAddress as id,
+          CURRENT_DATE as _snapshot_date,
+          0 as _extract_number,
           EntityNumber as entity_number,
           CASE
             WHEN EntityNumber LIKE '2.%' THEN 'establishment'
@@ -582,8 +583,6 @@ async function initialImport() {
           Box as box,
           ExtraAddressInfo as extra_address_info,
           TRY_CAST(DateStrikingOff AS DATE) as date_striking_off,
-          CURRENT_DATE as _snapshot_date,
-          0 as _extract_number,
           TRUE as _is_current
         FROM staged_addresses
       `,
@@ -598,9 +597,10 @@ async function initialImport() {
       'activities',
       '', // Already staged
       `
-        SELECT
-          EntityNumber || '_' || ActivityGroup || '_' || NaceVersion || '_' || NaceCode || '_' ||
-          ROW_NUMBER() OVER (PARTITION BY EntityNumber, ActivityGroup, NaceVersion, NaceCode ORDER BY Classification) as id,
+        SELECT DISTINCT
+          EntityNumber || '_' || ActivityGroup || '_' || NaceVersion || '_' || NaceCode || '_' || Classification as id,
+          CURRENT_DATE as _snapshot_date,
+          0 as _extract_number,
           EntityNumber as entity_number,
           CASE
             WHEN EntityNumber LIKE '2.%' THEN 'establishment'
@@ -610,8 +610,6 @@ async function initialImport() {
           NaceVersion as nace_version,
           NaceCode as nace_code,
           Classification as classification,
-          CURRENT_DATE as _snapshot_date,
-          0 as _extract_number,
           TRUE as _is_current
         FROM staged_activities
       `,
@@ -626,8 +624,10 @@ async function initialImport() {
       'contacts',
       '', // Already staged
       `
-        SELECT
-          EntityNumber || '_' || EntityContact || '_' || ContactType || '_' || ROW_NUMBER() OVER (PARTITION BY EntityNumber, EntityContact, ContactType ORDER BY Value) as id,
+        SELECT DISTINCT
+          EntityNumber || '_' || EntityContact || '_' || ContactType || '_' || Value as id,
+          CURRENT_DATE as _snapshot_date,
+          0 as _extract_number,
           EntityNumber as entity_number,
           CASE
             WHEN EntityNumber LIKE '2.%' THEN 'establishment'
@@ -636,8 +636,6 @@ async function initialImport() {
           EntityContact as entity_contact,
           ContactType as contact_type,
           Value as contact_value,
-          CURRENT_DATE as _snapshot_date,
-          0 as _extract_number,
           TRUE as _is_current
         FROM staged_contacts
       `,
@@ -654,10 +652,10 @@ async function initialImport() {
       `
         SELECT
           Id as id,
-          EnterpriseNumber as enterprise_number,
-          TRY_CAST(StartDate AS DATE) as start_date,
           CURRENT_DATE as _snapshot_date,
           0 as _extract_number,
+          EnterpriseNumber as enterprise_number,
+          TRY_CAST(StartDate AS DATE) as start_date,
           TRUE as _is_current
         FROM staged_branches
       `,

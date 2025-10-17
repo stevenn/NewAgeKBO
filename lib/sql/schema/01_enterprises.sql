@@ -3,8 +3,10 @@
 -- Uses code-only storage for descriptions (JOIN to codes table at query time)
 
 CREATE TABLE IF NOT EXISTS enterprises (
-  -- Primary key
-  enterprise_number VARCHAR PRIMARY KEY,
+  -- Primary key (composite to support temporal tracking)
+  enterprise_number VARCHAR NOT NULL,
+  _snapshot_date DATE NOT NULL,               -- Part of PK for temporal tracking
+  _extract_number INTEGER NOT NULL,           -- Part of PK for temporal tracking
 
   -- Basic info (codes only - descriptions via JOIN to codes table)
   status VARCHAR NOT NULL,                    -- AC (active) or ST (stopped)
@@ -16,17 +18,18 @@ CREATE TABLE IF NOT EXISTS enterprises (
 
   -- Primary denomination (denormalized - always exists, 100% coverage)
   -- Stored for fast search without JOINing to denominations table
+  -- Note: All enterprises have a legal name (Type 001), so no need to store type
   primary_name VARCHAR NOT NULL,              -- Primary name (any language, never NULL)
   primary_name_language VARCHAR,              -- Language code: 0=Unknown, 1=FR, 2=NL, 3=DE, 4=EN
   primary_name_nl VARCHAR,                    -- Dutch version (NULL if not available)
   primary_name_fr VARCHAR,                    -- French version (NULL if not available)
   primary_name_de VARCHAR,                    -- German version (NULL if not available)
-  primary_name_type VARCHAR,                  -- 001=Legal, 002=Abbreviation, 003=Commercial, 004=Branch
 
   -- Temporal tracking
-  _snapshot_date DATE NOT NULL,               -- Date of snapshot
-  _extract_number INTEGER NOT NULL,           -- Extract number from meta.csv
-  _is_current BOOLEAN NOT NULL                -- TRUE for current, FALSE for historical
+  _is_current BOOLEAN NOT NULL,               -- TRUE for current, FALSE for historical
+
+  -- Composite primary key to support temporal tracking
+  PRIMARY KEY (enterprise_number, _snapshot_date, _extract_number)
 );
 
 -- Comments for documentation

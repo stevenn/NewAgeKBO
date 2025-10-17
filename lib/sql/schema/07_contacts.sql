@@ -2,8 +2,10 @@
 -- Stores contact details (phone, email, web) for enterprises and establishments
 
 CREATE TABLE IF NOT EXISTS contacts (
-  -- Primary key
-  id VARCHAR PRIMARY KEY,                     -- UUID generated during import
+  -- Primary key (composite to support temporal tracking)
+  id VARCHAR NOT NULL,                        -- Concatenated: entity_number_entity_contact_contact_type_value
+  _snapshot_date DATE NOT NULL,               -- Part of PK for temporal tracking
+  _extract_number INTEGER NOT NULL,           -- Part of PK for temporal tracking
 
   -- Entity reference
   entity_number VARCHAR NOT NULL,
@@ -15,9 +17,10 @@ CREATE TABLE IF NOT EXISTS contacts (
   contact_value VARCHAR NOT NULL,             -- The actual contact information
 
   -- Temporal tracking
-  _snapshot_date DATE NOT NULL,
-  _extract_number INTEGER NOT NULL,
-  _is_current BOOLEAN NOT NULL,
+  _is_current BOOLEAN NOT NULL,               -- TRUE for current, FALSE for historical
+
+  -- Composite primary key to support temporal tracking
+  PRIMARY KEY (id, _snapshot_date, _extract_number),
 
   -- Constraints
   CHECK (entity_type IN ('enterprise', 'establishment'))

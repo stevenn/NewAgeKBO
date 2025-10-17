@@ -4,8 +4,10 @@
 -- Supports multi-language address components
 
 CREATE TABLE IF NOT EXISTS addresses (
-  -- Primary key
-  id VARCHAR PRIMARY KEY,                     -- UUID generated during import
+  -- Primary key (composite to support temporal tracking)
+  id VARCHAR NOT NULL,                        -- Concatenated: entity_number_type_of_address
+  _snapshot_date DATE NOT NULL,               -- Part of PK for temporal tracking
+  _extract_number INTEGER NOT NULL,           -- Part of PK for temporal tracking
 
   -- Entity reference
   entity_number VARCHAR NOT NULL,
@@ -26,9 +28,10 @@ CREATE TABLE IF NOT EXISTS addresses (
   date_striking_off DATE,                     -- Date address was removed
 
   -- Temporal tracking
-  _snapshot_date DATE NOT NULL,
-  _extract_number INTEGER NOT NULL,
-  _is_current BOOLEAN NOT NULL,
+  _is_current BOOLEAN NOT NULL,               -- TRUE for current, FALSE for historical
+
+  -- Composite primary key to support temporal tracking
+  PRIMARY KEY (id, _snapshot_date, _extract_number),
 
   -- Constraints
   CHECK (entity_type IN ('enterprise', 'establishment')),

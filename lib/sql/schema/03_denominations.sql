@@ -4,8 +4,10 @@
 -- Primary name is denormalized into enterprises table for performance
 
 CREATE TABLE IF NOT EXISTS denominations (
-  -- Primary key
-  id VARCHAR PRIMARY KEY,                     -- UUID generated during import
+  -- Primary key (composite to support temporal tracking)
+  id VARCHAR NOT NULL,                        -- Concatenated: entity_number_type_language_row_number
+  _snapshot_date DATE NOT NULL,               -- Part of PK for temporal tracking
+  _extract_number INTEGER NOT NULL,           -- Part of PK for temporal tracking
 
   -- Entity reference (can be enterprise OR establishment)
   entity_number VARCHAR NOT NULL,             -- Enterprise or establishment number
@@ -17,9 +19,10 @@ CREATE TABLE IF NOT EXISTS denominations (
   denomination VARCHAR NOT NULL,              -- The actual name text
 
   -- Temporal tracking
-  _snapshot_date DATE NOT NULL,
-  _extract_number INTEGER NOT NULL,
-  _is_current BOOLEAN NOT NULL,
+  _is_current BOOLEAN NOT NULL,               -- TRUE for current, FALSE for historical
+
+  -- Composite primary key to support temporal tracking
+  PRIMARY KEY (id, _snapshot_date, _extract_number),
 
   -- Constraints
   CHECK (entity_type IN ('enterprise', 'establishment')),
