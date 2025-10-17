@@ -10,9 +10,11 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
+    "csv-parse": "^6.1.0",
     "dotenv": "^17.2.3",
     "duckdb": "^1.4.1",
     "next": "^15.1.0",
+    "node-stream-zip": "^1.15.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

@@ -42,6 +42,9 @@ next-env.d.ts
 # Sample Data - Full Dataset (too large for git)
 sampledata/KboOpenData_*_*_Full/
 
+# Sample Data - Update ZIP files (too large for git)
+sampledata/*Update.zip
+
 # Parquet test files
 parquet-test/
 
