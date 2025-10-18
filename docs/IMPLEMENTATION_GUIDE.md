@@ -1,7 +1,7 @@
 # KBO Open Data - Implementation Guide
 
-**Last Updated**: 2025-10-17
-**Status**: Phase 1 Complete ✅ | Phase 2 In Progress
+**Last Updated**: 2025-10-18
+**Status**: Phase 1 Complete ✅ | Phase 2 Complete ✅ | Phase 3 Complete ✅
 
 ---
 
@@ -16,16 +16,185 @@
 - [x] All core utilities, validation, and error handling
 - [x] Tested with real data (Extracts 140 & 141)
 
-### 🔄 In Progress (Phase 2)
-- [ ] Monthly import script (`scripts/monthly-import.ts`)
+### ✅ Completed (Phase 2)
+- [x] Shared import library (`lib/import/`) with reusable transformation logic
+- [x] DuckDB-based local processing for initial and daily imports
+- [x] Parquet export with ZSTD compression for efficient storage
+- [x] Import scripts with full job tracking and error handling
+- [x] Database views for current data access (`*_current`)
+
+### ✅ Completed (Phase 3)
+- [x] Next.js web application with App Router
+- [x] Admin UI with Clerk authentication
+- [x] Dashboard showing database statistics
+- [x] Browse/search functionality with pagination
+- [x] Import jobs monitoring and history
+- [x] Settings page with configuration display
+- [x] API endpoints for data access
+- [x] In-memory caching for codes table
+- [x] Import job tracking in all scripts
+
+### 📅 Next (Phase 4)
+- [ ] Vercel cron for automated daily updates
+- [ ] Monthly import automation
 - [ ] 24-month retention policy implementation
 - [ ] Automated testing for pipeline
+- [ ] Public API endpoints (if needed)
 
-### 📅 Next (Phase 3)
-- [ ] Next.js web application
-- [ ] Admin UI for job monitoring
-- [ ] Vercel cron for daily updates
-- [ ] API endpoints for data access
+---
+
+## Phase 3 Setup Steps
+
+After completing Phases 1 and 2, follow these steps to set up the admin web application:
+
+### 1. Create Database Views (One-Time Setup)
+
+The admin application uses database views to simplify queries and improve performance. Create these views by running:
+
+```bash
+npx tsx scripts/create-views.ts
+```
+
+This creates the following views:
+- `enterprises_current` - Current snapshot of enterprises
+- `establishments_current` - Current snapshot of establishments
+- `denominations_current` - Current snapshot of denominations
+- `addresses_current` - Current snapshot of addresses
+- `activities_current` - Current snapshot of activities
+- `contacts_current` - Current snapshot of contacts
+- `branches_current` - Current snapshot of branches
+
+### 2. Configure Clerk Authentication
+
+The admin interface is protected by Clerk authentication. Set up Clerk by:
+
+1. Create a Clerk account at https://clerk.com
+2. Create a new application
+3. Copy your API keys to `.env.local`:
+
+```bash
+# Clerk Authentication
+CLERK_SECRET_KEY=sk_live_...
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_live_...
+```
+
+4. Configure sign-in settings in Clerk dashboard (email/password recommended)
+
+### 3. Populate Import Jobs Table
+
+The import jobs monitoring page requires historical job data. Since the import scripts now track jobs automatically, you need to run a fresh import to populate the `import_jobs` table:
+
+```bash
+# Option 1: Run a fresh initial import (if starting fresh)
+npx tsx scripts/initial-import.ts ./path-to-kbo-data
+
+# Option 2: Run a daily update (if you already have data)
+npx tsx scripts/apply-daily-update.ts ./path-to-update-data
+```
+
+**Note**: Import scripts run before this update did not write to the `import_jobs` table, so they won't appear in the admin UI.
+
+### 4. Start the Development Server
+
+```bash
+npm run dev
+```
+
+The admin interface will be available at:
+- http://localhost:3000 - Public landing page
+- http://localhost:3000/admin - Admin dashboard (requires authentication)
+
+### 5. Production Deployment (Vercel)
+
+When deploying to Vercel, configure these environment variables:
+
+```bash
+# Motherduck Database
+MOTHERDUCK_TOKEN=your_token_here
+MOTHERDUCK_DATABASE=kbo
+
+# Clerk Authentication
+CLERK_SECRET_KEY=sk_live_...
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_live_...
+
+# Application URL
+NEXT_PUBLIC_APP_URL=https://your-app.vercel.app
+```
+
+---
+
+## Admin UI Features
+
+### Dashboard (`/admin`)
+- Database statistics (total enterprises, establishments, activities)
+- Recent import job status
+- Quick links to all admin features
+
+### Browse Data (`/admin/browse`)
+- Search enterprises by name or number
+- Pagination (25 results per page)
+- Display juridical form descriptions
+- Filter by status (active/stopped)
+- Performance optimized with:
+  - Database views for current data only
+  - In-memory caching for codes table
+  - Parallel execution of count and data queries
+
+### Import Management (`/admin/imports`)
+- View import job history
+- See job status (pending/running/completed/failed)
+- Track records processed, inserted, updated, deleted
+- View error messages for failed jobs
+- Manual trigger for daily updates (placeholder for future cron integration)
+
+### Settings (`/admin/settings`)
+- View Motherduck database configuration
+- Display system information
+- Configuration persistence (planned for future)
+
+---
+
+## Performance Optimizations Implemented
+
+### 1. Database Views
+All queries use `*_current` views instead of filtering on `_is_current = true`. This reduces query complexity and improves readability.
+
+```sql
+-- Instead of:
+SELECT * FROM enterprises WHERE _is_current = true
+
+-- We use:
+SELECT * FROM enterprises_current
+```
+
+### 2. In-Memory Codes Cache
+The codes table (21K rows) is loaded into memory on first use and cached for the lifetime of the serverless function. This eliminates expensive JOINs for looking up code descriptions.
+
+**Implementation**: `lib/cache/codes.ts`
+
+**Trade-off**: Cold starts take 3-12 seconds to load cache, but this is acceptable for the admin UI given the serverless architecture.
+
+### 3. Parallel Query Execution
+Count queries and data queries execute in parallel using `Promise.all()`, reducing total query time.
+
+```typescript
+const [results, countResult] = await Promise.all([
+  executeQuery(db, searchSql),
+  executeQuery(db, countSql),
+])
+```
+
+### 4. Post-Query Enrichment
+Instead of JOINing to the codes table, we load data first and enrich with descriptions from cache:
+
+```typescript
+const formattedResults = await Promise.all(
+  results.map(async (row) => ({
+    ...row,
+    juridicalFormDescription: await getJuridicalFormDescription(row.juridical_form),
+  }))
+)
+```
 
 ---
 

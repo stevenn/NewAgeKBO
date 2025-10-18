@@ -18,6 +18,7 @@ import { config } from 'dotenv'
 config({ path: ['.env.local', '.env'] })
 
 import { existsSync } from 'fs'
+import { randomUUID } from 'crypto'
 import * as path from 'path'
 const { join } = path
 import {
@@ -127,6 +128,9 @@ async function initialImport() {
 
   console.log(`📂 Data path: ${dataPath}\n`)
 
+  let jobId: string | undefined
+  let mdDb: any
+
   try {
     // Step 1: Verify CSV files
     console.log('1️⃣  Verifying CSV files...')
@@ -146,10 +150,10 @@ async function initialImport() {
     // Step 2: Connect to Motherduck
     console.log('2️⃣  Connecting to Motherduck...')
     const mdConfig = getMotherduckConfig()
-    const motherduckDb = await connectMotherduck()
+    mdDb = await connectMotherduck()
 
     // Use the database
-    await executeQuery(motherduckDb, `USE ${mdConfig.database}`)
+    await executeQuery(mdDb, `USE ${mdConfig.database}`)
     console.log(`   ✅ Connected to database: ${mdConfig.database}\n`)
 
     // Step 3: Verify schema exists
@@ -169,7 +173,7 @@ async function initialImport() {
 
     const missingTables: string[] = []
     for (const tableName of requiredTables) {
-      const exists = await tableExists(motherduckDb, tableName)
+      const exists = await tableExists(mdDb, tableName)
       if (!exists) {
         missingTables.push(tableName)
       }
@@ -195,7 +199,7 @@ async function initialImport() {
 
     for (const table of tablesToCheck) {
       const result = await executeQuery<{ count: number }>(
-        motherduckDb,
+        mdDb,
         `SELECT COUNT(*) as count FROM ${table}`
       )
       totalRows += Number(result[0].count)  // Convert BigInt to Number
@@ -226,8 +230,31 @@ async function initialImport() {
     // Validate extract type is 'full'
     validateExtractType(metadata, 'full')
 
-    // Step 7: Load and process data
-    console.log('7️⃣  Processing data...\n')
+    // Step 7: Create import job record
+    console.log('7️⃣  Creating import job record...')
+    jobId = randomUUID()
+    const jobStartTime = new Date().toISOString()
+
+    await executeQuery(
+      mdDb,
+      `INSERT INTO import_jobs (
+        id, extract_number, extract_type, snapshot_date, extract_timestamp,
+        status, started_at, worker_type
+      ) VALUES (
+        '${jobId}',
+        ${metadata.extractNumber},
+        '${metadata.extractType}',
+        '${metadata.snapshotDate}',
+        '${metadata.extractTimestamp}',
+        'running',
+        '${jobStartTime}',
+        'local'
+      )`
+    )
+    console.log(`   ✅ Job ID: ${jobId}\n`)
+
+    // Step 8: Load and process data
+    console.log('8️⃣  Processing data...\n')
 
     const stats: ImportStats[] = []
     const startTime = Date.now()
@@ -344,10 +371,27 @@ async function initialImport() {
     stats.push(stat)
 
     // Close connections
-    await closeMotherduck(motherduckDb)
+    await closeMotherduck(mdDb)
 
     // Summary
     const totalDuration = Date.now() - startTime
+
+    // Update import job to completed
+    const totalRecordsProcessed = stats.reduce((sum, stat) => sum + stat.rowsInserted, 0)
+    const jobEndTime = new Date().toISOString()
+
+    await executeQuery(
+      mdDb,
+      `UPDATE import_jobs SET
+        status = 'completed',
+        completed_at = '${jobEndTime}',
+        records_processed = ${totalRecordsProcessed},
+        records_inserted = ${totalRecordsProcessed},
+        records_updated = 0,
+        records_deleted = 0
+      WHERE id = '${jobId}'`
+    )
+
     console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
     console.log('✨ SUCCESS! Initial import complete')
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n')
@@ -360,10 +404,28 @@ async function initialImport() {
     }
 
     console.log(`\n   Total duration: ${(totalDuration / 1000).toFixed(2)}s`)
+    console.log(`   Job ID: ${jobId}`)
     console.log()
 
   } catch (error) {
     console.error('\n❌ Import failed!\n')
+
+    // Try to update job status to failed (if job was created)
+    try {
+      if (typeof jobId !== 'undefined' && typeof mdDb !== 'undefined') {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+        await executeQuery(
+          mdDb,
+          `UPDATE import_jobs SET
+            status = 'failed',
+            completed_at = '${new Date().toISOString()}',
+            error_message = '${errorMessage.replace(/'/g, "''")}'
+          WHERE id = '${jobId}'`
+        )
+      }
+    } catch (updateError) {
+      console.error('Failed to update job status:', updateError)
+    }
 
     if (error instanceof Error) {
       console.error(`Error: ${formatUserError(error)}\n`)
