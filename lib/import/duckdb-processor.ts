@@ -200,6 +200,7 @@ export async function processTable(
   const rowCount = await new Promise<number>((resolve, reject) => {
     localDb.all(
       `SELECT COUNT(*) as count FROM transformed_${tableName}`,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (err, rows: any[]) => {
         if (err) reject(err)
         else resolve(Number(rows[0].count))  // Convert BigInt to Number
@@ -279,7 +280,7 @@ export async function stageAllCsvFiles(
  * @returns Total number of records marked historical
  */
 export async function markAllCurrentAsHistorical(
-  motherduckDb: any,
+  motherduckDb: duckdb.Database,
   onProgress?: (table: string, count: number) => void
 ): Promise<number> {
   const tables = [
@@ -295,11 +296,13 @@ export async function markAllCurrentAsHistorical(
   let totalMarked = 0
 
   for (const table of tables) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = await new Promise<any[]>((resolve, reject) => {
       motherduckDb.all(
         `UPDATE ${table}
          SET _is_current = false
          WHERE _is_current = true`,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (err: Error | null, rows: any[]) => {
           if (err) reject(err)
           else resolve(rows)
@@ -325,7 +328,7 @@ export async function markAllCurrentAsHistorical(
  * @returns Total number of records deleted
  */
 export async function cleanupOldSnapshots(
-  motherduckDb: any,
+  motherduckDb: duckdb.Database,
   retentionMonths: number = 24,
   onProgress?: (table: string, count: number) => void
 ): Promise<number> {
@@ -342,10 +345,12 @@ export async function cleanupOldSnapshots(
   let totalCleaned = 0
 
   for (const table of tables) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = await new Promise<any[]>((resolve, reject) => {
       motherduckDb.all(
         `DELETE FROM ${table}
          WHERE _snapshot_date < CURRENT_DATE - INTERVAL '${retentionMonths} months'`,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (err: Error | null, rows: any[]) => {
           if (err) reject(err)
           else resolve(rows)
