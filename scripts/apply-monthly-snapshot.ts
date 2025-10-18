@@ -117,7 +117,7 @@ async function processMonthlySnapshot(dataDir: string): Promise<SnapshotStats> {
 
   // Step 2: Initialize local DuckDB with Motherduck extension
   console.log('2️⃣  Initializing DuckDB with Motherduck connection...')
-  const localDb = await initializeDuckDBWithMotherduck(mdConfig.token, mdConfig.database)
+  const localDb = await initializeDuckDBWithMotherduck(mdConfig.token, mdConfig.database || 'kbo')
   console.log('   ✅ DuckDB initialized and connected to Motherduck\n')
 
   try {
