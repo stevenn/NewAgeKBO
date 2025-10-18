@@ -6,10 +6,10 @@ A modern Next.js platform for managing and querying Belgian KBO (Crossroads Bank
 
 ## 🎯 Project Status
 
-**Phase**: Phase 1 Complete ✅ | Phase 2 In Progress
-**Current**: Data pipeline operational, Web app next
-**Last Import**: Extract #140 (2025-10-04) - 46.8M rows
-**Last Update**: Extract #141 (2025-10-05) - 11,131 changes
+**Phase**: Phase 1 Complete ✅ | Phase 2 Complete ✅
+**Current**: Data pipeline fully operational, Admin UI next
+**Last Import**: Extract #140 (2025-10-05) - 46.8M rows
+**Last Update**: Extract #141 (2025-10-06) - 11,131 changes
 
 ---
 
@@ -245,6 +245,11 @@ ORDER BY _snapshot_date DESC;
 ```
 NewAgeKBO/
 ├── lib/
+│   ├── import/              # NEW: Shared import library
+│   │   ├── metadata.ts      # Metadata parsing utilities
+│   │   ├── transformations.ts # SQL transformation definitions
+│   │   ├── duckdb-processor.ts # DuckDB processing helpers
+│   │   └── index.ts         # Central exports
 │   ├── motherduck/          # Motherduck connection and query utilities
 │   ├── sql/schema/          # SQL schema files (11 tables)
 │   ├── types/               # TypeScript type definitions
@@ -252,9 +257,9 @@ NewAgeKBO/
 │   ├── validation/          # Enterprise number, meta.csv validation
 │   └── errors/              # Error handling
 ├── scripts/
-│   ├── initial-import.ts         # Initial full import (46.8M rows)
+│   ├── initial-import.ts         # Initial full import (REFACTORED)
 │   ├── apply-daily-update.ts     # Daily incremental updates
-│   ├── apply-monthly-snapshot.ts # Monthly snapshot rotation
+│   ├── apply-monthly-snapshot.ts # Monthly snapshot (REWRITTEN with DuckDB)
 │   ├── batch-apply-updates.ts    # Batch apply all updates
 │   ├── create-schema.ts          # Schema creation
 │   ├── cleanup-data.ts           # Data cleanup
@@ -298,15 +303,16 @@ NewAgeKBO/
 - [x] Column mapping library (CSV → Database)
 - [x] All core utilities and error handling
 
-### 🔄 Phase 2: Monthly Full Import Pipeline (In Progress)
-- [x] Build CSV → DuckDB transformation pipeline (local)
-- [x] Implement link table transformations
-- [x] Implement snapshot rotation logic (`_is_current` updates)
-- [x] Test full re-import with sample data (Extract 140)
-- [x] Benchmark with full dataset (21 minutes, 46.8M rows)
-- [ ] **TODO**: Create monthly-import.ts script
-- [ ] **TODO**: Implement 24-month retention policy
-- [ ] **TODO**: Automated testing for pipeline
+### ✅ Phase 2: Data Import Pipeline (Complete)
+- [x] Build shared import library (lib/import/)
+- [x] Metadata parsing utilities (DuckDB and string parsing)
+- [x] SQL transformation definitions for all 9 tables
+- [x] DuckDB processing helpers (staging, transformations, streaming)
+- [x] Refactor initial-import.ts to use shared library (50% code reduction)
+- [x] Rewrite apply-monthly-snapshot.ts with DuckDB transformations
+- [x] Test daily updates with real data (Extract #141)
+- [x] 24-month retention policy implemented
+- [x] Comprehensive documentation in PROGRESS.md
 
 ### 📅 Phase 3: Web App & Admin UI (Next)
 - [ ] Initialize Next.js 15 app with TypeScript

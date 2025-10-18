@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+For technical design, data analysis results and implementation guidance and progress, check the files in the @docs folder (not: old_analysis).
+
 ## Overview
 
 This repository is being developed to work with **KBO (Crossroads Bank for Enterprises) Open Data** from the Belgian Federal Public Service Economy. The KBO database contains information about all Belgian enterprises and establishments.
@@ -55,7 +57,7 @@ Example: If an enterprise's name changes, `denomination_delete.csv` contains the
 
 ## Reference Documentation
 
-Complete technical specifications are available in:
+Technical specifications are available in:
 - `/specs/KBOCookbook_EN.md` - English version (R018.00)
 - `/specs/KBOCookbook_NL.md` - Dutch version (R018.00)
 
