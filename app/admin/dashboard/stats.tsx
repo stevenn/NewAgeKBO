@@ -3,6 +3,8 @@ import { getDatabaseStats } from '@/lib/motherduck/stats'
 export async function DatabaseStats() {
   const stats = await getDatabaseStats()
 
+  // Total current records across all tables (enterprises, establishments, activities, addresses, denominations, contacts)
+  // Note: Multiple extracts may be current simultaneously during incremental updates
   const totalRecords = Object.values(stats.recordCounts).reduce((sum, count) => sum + count, 0)
 
   return (
@@ -18,13 +20,13 @@ export async function DatabaseStats() {
         <div className="rounded-lg border bg-white p-6">
           <h3 className="text-sm font-medium text-gray-600">Latest Extract</h3>
           <p className="mt-2 text-3xl font-bold">#{stats.currentExtract}</p>
-          <p className="mt-1 text-sm text-gray-500">{stats.lastUpdate}</p>
+          <p className="mt-1 text-sm text-gray-500">Snapshot: {stats.lastUpdate}</p>
         </div>
 
         <div className="rounded-lg border bg-white p-6">
           <h3 className="text-sm font-medium text-gray-600">Database Size</h3>
           <p className="mt-2 text-3xl font-bold">{stats.databaseSize}</p>
-          <p className="mt-1 text-sm text-gray-500">Parquet + ZSTD</p>
+          <p className="mt-1 text-sm text-gray-500">Motherduck Storage</p>
         </div>
       </div>
 
@@ -37,11 +39,11 @@ export async function DatabaseStats() {
               <span className="text-green-600 font-medium">Connected</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-600">Last Update</span>
+              <span className="text-gray-600">Latest Snapshot Date</span>
               <span className="font-medium">{stats.lastUpdate}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-600">Total Records</span>
+              <span className="text-gray-600">Total Current Records</span>
               <span className="font-medium">{totalRecords.toLocaleString()}</span>
             </div>
           </div>

@@ -24,13 +24,12 @@ export async function getDatabaseStats(): Promise<DatabaseStats> {
     const dbName = process.env.MOTHERDUCK_DATABASE || 'kbo'
     await executeQuery(db, `USE ${dbName}`)
 
-    // Get current extract number and snapshot date
+    // Get latest extract number and snapshot date
     const extractInfo = await executeQuery<{ extract_number: number; snapshot_date: string | Date }>(
       db,
-      `SELECT DISTINCT _extract_number as extract_number, _snapshot_date::VARCHAR as snapshot_date
+      `SELECT MAX(_extract_number) as extract_number, MAX(_snapshot_date)::VARCHAR as snapshot_date
        FROM enterprises
-       WHERE _is_current = true
-       LIMIT 1`
+       WHERE _is_current = true`
     )
 
     const currentExtract = extractInfo[0]?.extract_number || 0
@@ -38,6 +37,13 @@ export async function getDatabaseStats(): Promise<DatabaseStats> {
     const lastUpdate = snapshotDate
       ? (typeof snapshotDate === 'string' ? snapshotDate : snapshotDate.toISOString().split('T')[0])
       : 'Unknown'
+
+    // Get actual database size from Motherduck
+    const sizeInfo = await executeQuery<{ database_size: string }>(
+      db,
+      `SELECT database_size FROM pragma_database_size() WHERE database_name = '${dbName}'`
+    )
+    const databaseSize = sizeInfo[0]?.database_size || 'Unknown'
 
     // Get record counts for current data
     const counts = await Promise.all([
@@ -55,7 +61,7 @@ export async function getDatabaseStats(): Promise<DatabaseStats> {
       totalActivities: Number(counts[2][0].count),
       currentExtract,
       lastUpdate,
-      databaseSize: '~100 MB', // Parquet compressed
+      databaseSize,
       recordCounts: {
         enterprises: Number(counts[0][0].count),
         establishments: Number(counts[1][0].count),
