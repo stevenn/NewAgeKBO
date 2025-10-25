@@ -107,9 +107,12 @@ async function applyDeletes(
     const entityNumbers = records.map(r => `'${r[csvPkColumn]}'`).join(',')
 
     // Mark records as historical (don't actually delete)
+    // Track which extract deleted the record for accurate temporal queries
+    const extractNumber = parseInt(metadata.ExtractNumber)
     const sql = `
       UPDATE ${dbTableName}
-      SET _is_current = false
+      SET _is_current = false,
+          _deleted_at_extract = ${extractNumber}
       WHERE ${dbPkColumn} IN (${entityNumbers})
         AND _is_current = true
     `

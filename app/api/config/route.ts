@@ -1,13 +1,11 @@
 import { NextResponse } from 'next/server'
-import { auth } from '@clerk/nextjs/server'
+import { checkAdminAccess } from '@/lib/auth/check-admin'
 
 export async function GET() {
   try {
-    // Check authentication
-    const { userId } = await auth()
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    // Check authentication and admin role
+    const authError = await checkAdminAccess()
+    if (authError) return authError
 
     const config = {
       motherduckDatabase: process.env.MOTHERDUCK_DATABASE || 'kbo',

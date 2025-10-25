@@ -6,6 +6,7 @@ export default function AdminLayout({
 }: {
   children: React.ReactNode
 }) {
+  // Role check handled by middleware
   return (
     <div className="flex min-h-screen">
       {/* Sidebar */}

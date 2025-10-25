@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { auth } from '@clerk/nextjs/server'
+import { checkAdminAccess } from '@/lib/auth/check-admin'
 import { connectMotherduck, closeMotherduck, executeQuery } from '@/lib/motherduck'
 
 export interface ImportJobRecord {
@@ -20,11 +20,9 @@ export interface ImportJobRecord {
 
 export async function GET() {
   try {
-    // Check authentication
-    const { userId } = await auth()
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    // Check authentication and admin role
+    const authError = await checkAdminAccess()
+    if (authError) return authError
 
     // Connect to Motherduck
     const db = await connectMotherduck()

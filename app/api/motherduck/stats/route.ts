@@ -1,16 +1,14 @@
 import { NextResponse } from 'next/server'
-import { auth } from '@clerk/nextjs/server'
+import { checkAdminAccess } from '@/lib/auth/check-admin'
 import { getDatabaseStats } from '@/lib/motherduck/stats'
 
 export type { DatabaseStats } from '@/lib/motherduck/stats'
 
 export async function GET() {
   try {
-    // Check authentication
-    const { userId } = await auth()
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    // Check authentication and admin role
+    const authError = await checkAdminAccess()
+    if (authError) return authError
 
     const stats = await getDatabaseStats()
     return NextResponse.json(stats)

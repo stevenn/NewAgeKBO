@@ -1,4 +1,5 @@
 import { getDatabaseStats } from '@/lib/motherduck/stats'
+import { JuridicalFormsChart } from './juridical-forms-chart'
 
 export async function DatabaseStats() {
   const stats = await getDatabaseStats()
@@ -30,7 +31,7 @@ export async function DatabaseStats() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
         <div className="rounded-lg border bg-white p-6">
           <h2 className="text-xl font-semibold mb-4">System Status</h2>
           <div className="space-y-2">
@@ -69,6 +70,57 @@ export async function DatabaseStats() {
               <span className="font-medium">{stats.recordCounts.addresses.toLocaleString()}</span>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Distribution across juridical forms */}
+      <div className="rounded-lg border bg-white p-6 mb-8">
+        <h2 className="text-xl font-semibold mb-4">Distribution across juridical forms</h2>
+        <JuridicalFormsChart forms={stats.juridicalForms.all} />
+      </div>
+
+      {/* Language and Province Distribution */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Language Distribution */}
+        <div className="rounded-lg border bg-white p-6">
+          <h2 className="text-xl font-semibold mb-4">Language Distribution</h2>
+          <p className="text-xs text-gray-500 mb-3">
+            Natural persons ({(stats.totalEnterprises - stats.languageDistribution.reduce((sum, l) => sum + l.count, 0)).toLocaleString()}) excluded - no language data.
+          </p>
+          <div className="space-y-3">
+            {stats.languageDistribution.map((lang) => (
+              <div key={lang.language} className="space-y-1">
+                <div className="flex justify-between text-sm">
+                  <span className="font-medium">{lang.language}</span>
+                  <span className="text-gray-600">
+                    {lang.count.toLocaleString()} ({lang.percentage.toFixed(1)}%)
+                  </span>
+                </div>
+                <div className="relative h-2 bg-gray-100 rounded-full overflow-hidden">
+                  <div
+                    className="absolute h-full bg-green-500 rounded-full transition-all"
+                    style={{ width: `${lang.percentage}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Province Distribution */}
+        <div className="rounded-lg border bg-white p-6">
+          <h2 className="text-xl font-semibold mb-4">Province Distribution</h2>
+          <div className="space-y-2 max-h-96 overflow-y-auto">
+            {stats.provinceDistribution.map((province) => (
+              <div key={province.province} className="flex justify-between text-sm">
+                <span className="text-gray-700">{province.province}</span>
+                <span className="font-medium tabular-nums">
+                  {province.count.toLocaleString()} ({province.percentage.toFixed(1)}%)
+                </span>
+              </div>
+            ))}
+          </div>
+          <p className="mt-4 text-xs text-gray-500">Based on registered addresses with valid postal codes</p>
         </div>
       </div>
     </>

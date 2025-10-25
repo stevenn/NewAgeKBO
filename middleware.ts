@@ -1,4 +1,5 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
+import { NextResponse } from 'next/server'
 
 // Define protected routes (admin routes require authentication)
 const isProtectedRoute = createRouteMatcher([
@@ -8,7 +9,15 @@ const isProtectedRoute = createRouteMatcher([
 export default clerkMiddleware(async (auth, req) => {
   // Protect admin routes
   if (isProtectedRoute(req)) {
-    await auth.protect()
+    const { sessionClaims } = await auth.protect()
+
+    // After configuring custom session claims in Clerk Dashboard,
+    // metadata will be available in sessionClaims
+    const metadata = sessionClaims?.metadata as { role?: string } | undefined
+
+    if (metadata?.role !== 'admin') {
+      return NextResponse.redirect(new URL('/unauthorized', req.url))
+    }
   }
 })
 
