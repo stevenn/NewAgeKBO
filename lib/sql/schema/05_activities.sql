@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS activities (
 
   -- Temporal tracking
   _is_current BOOLEAN NOT NULL,               -- TRUE for current, FALSE for historical
+  _deleted_at_extract INTEGER,                -- Update Set number when this record was deleted (NULL if current)
 
   -- Composite primary key to support temporal tracking
   PRIMARY KEY (id, _snapshot_date, _extract_number),
@@ -33,7 +34,15 @@ CREATE TABLE IF NOT EXISTS activities (
 );
 
 -- Comments for documentation
-COMMENT ON TABLE activities IS 'Economic activities (~36M) - join nace_codes for descriptions';
+COMMENT ON TABLE activities IS 'Economic activities (~36M) - join nace_codes for descriptions. Supports temporal versioning for historical queries.';
+COMMENT ON COLUMN activities.id IS 'Composite key: entity_number_group_version_code_classification_hash. Ensures uniqueness across versions.';
+COMMENT ON COLUMN activities._snapshot_date IS 'Date of KBO data snapshot (part of composite PK for temporal tracking)';
+COMMENT ON COLUMN activities._extract_number IS 'Monotonic extract number for version ordering (part of composite PK)';
+COMMENT ON COLUMN activities.entity_number IS 'Enterprise or establishment number (FK to either table)';
+COMMENT ON COLUMN activities.classification IS 'MAIN=Main activity, SECO=Secondary, ANCI=Ancillary';
+COMMENT ON COLUMN activities.nace_version IS '2003, 2008, or 2025';
+COMMENT ON COLUMN activities._is_current IS 'TRUE for current version (highest extract number), FALSE for historical versions';
+COMMENT ON COLUMN activities._deleted_at_extract IS 'Extract number when this record was superseded. NULL if current or never superseded. NOTE: Not populated by import scripts (added 2025-10-26), documented limitation.';
 COMMENT ON COLUMN activities.activity_group IS '001=VAT, 002=EDRL, 003=General, 004=Federal public, 005=RSZPPO, 006=RSZ, 007=Subsidized education';
 COMMENT ON COLUMN activities.classification IS 'MAIN=Main activity, SECO=Secondary, ANCI=Auxiliary';
 COMMENT ON COLUMN activities.nace_version IS '2003, 2008, or 2025';

@@ -7,6 +7,10 @@
 --
 -- Design principles:
 -- 1. Temporal tracking (current + monthly snapshots)
+--    - Each record has composite PK: (id, _snapshot_date, _extract_number)
+--    - _is_current flag marks latest version
+--    - _deleted_at_extract column for version supersession tracking (schema only, not populated)
+--    - Point-in-time queries use window functions with natural key partitioning
 -- 2. Link tables for activities and addresses (storage optimization)
 -- 3. Code-only storage with runtime JOIN for descriptions
 -- 4. Multi-language support (NL/FR/DE/EN)

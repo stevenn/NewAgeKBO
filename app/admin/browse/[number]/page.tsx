@@ -221,12 +221,14 @@ export default function EnterpriseDetailPage() {
                 </span>
               </div>
               {comparison && comparison.status.type === 'changed' && (
-                <p className="text-xs text-gray-500 mt-1">Changed to: {comparison.status.newValue}</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Changed from: {comparison.status.oldValue} (on {previousDetail?.snapshotDate})
+                </p>
               )}
             </div>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 pt-4 border-t">
             <div>
               <div className="flex items-center gap-2 mb-1">
                 <p className="text-sm text-gray-600">Juridical Form</p>
@@ -242,7 +244,26 @@ export default function EnterpriseDetailPage() {
               )}
               {comparison && comparison.juridicalForm.type === 'changed' && (
                 <p className="text-xs text-gray-500 mt-1">
-                  Changed to: {comparison.juridicalForm.newValue}
+                  Changed from: {comparison.juridicalForm.oldValue} (on {previousDetail?.snapshotDate})
+                </p>
+              )}
+            </div>
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <p className="text-sm text-gray-600">Juridical Situation</p>
+                {comparison && comparison.juridicalSituation.type === 'changed' && (
+                  <span className="w-2 h-2 rounded-full bg-yellow-500" title="Changed"></span>
+                )}
+              </div>
+              <p className="font-medium">
+                {displayDetail.juridicalSituationDescription || displayDetail.juridicalSituation || '-'}
+              </p>
+              {displayDetail.juridicalSituationDescription && displayDetail.juridicalSituation && (
+                <p className="text-xs text-gray-500">{displayDetail.juridicalSituation}</p>
+              )}
+              {comparison && comparison.juridicalSituation.type === 'changed' && (
+                <p className="text-xs text-gray-500 mt-1">
+                  Changed from: {comparison.juridicalSituation.oldValue} (on {previousDetail?.snapshotDate})
                 </p>
               )}
             </div>
@@ -261,7 +282,7 @@ export default function EnterpriseDetailPage() {
               )}
               {comparison && comparison.typeOfEnterprise.type === 'changed' && (
                 <p className="text-xs text-gray-500 mt-1">
-                  Changed to: {comparison.typeOfEnterprise.newValue}
+                  Changed from: {comparison.typeOfEnterprise.oldValue} (on {previousDetail?.snapshotDate})
                 </p>
               )}
             </div>
@@ -275,7 +296,7 @@ export default function EnterpriseDetailPage() {
               <p className="font-medium">{displayDetail.startDate || '-'}</p>
               {comparison && comparison.startDate.type === 'changed' && (
                 <p className="text-xs text-gray-500 mt-1">
-                  Changed to: {comparison.startDate.newValue}
+                  Changed from: {comparison.startDate.oldValue} (on {previousDetail?.snapshotDate})
                 </p>
               )}
             </div>
@@ -317,11 +338,14 @@ export default function EnterpriseDetailPage() {
                     >
                       <div className="w-12">
                         <span className="inline-block px-2 py-1 bg-gray-100 rounded text-xs font-medium">
-                          {denom.language}
+                          {denom.languageDescription || denom.language || ''}
                         </span>
                       </div>
                       <div className="flex-1">
-                        <p className="text-sm text-gray-600">Type: {denom.typeCode}</p>
+                        <p className="text-sm text-gray-600">
+                          Type: {denom.typeCode}
+                          {denom.typeDescription && ` - ${denom.typeDescription}`}
+                        </p>
                         <p className="font-medium line-through">{denom.denomination}</p>
                       </div>
                       <div className="flex items-center">
@@ -346,11 +370,14 @@ export default function EnterpriseDetailPage() {
                   <div key={idx} className="flex gap-4 pb-3 border-b last:border-b-0">
                     <div className="w-12">
                       <span className="inline-block px-2 py-1 bg-gray-100 rounded text-xs font-medium">
-                        {denom.language}
+                        {denom.languageDescription || denom.language || ''}
                       </span>
                     </div>
                     <div className="flex-1">
-                      <p className="text-sm text-gray-600">Type: {denom.typeCode}</p>
+                      <p className="text-sm text-gray-600">
+                        Type: {denom.typeCode}
+                        {denom.typeDescription && ` - ${denom.typeDescription}`}
+                      </p>
                       <p className="font-medium">{denom.denomination}</p>
                     </div>
                   </div>
@@ -366,11 +393,14 @@ export default function EnterpriseDetailPage() {
                     >
                       <div className="w-12">
                         <span className="inline-block px-2 py-1 bg-gray-100 rounded text-xs font-medium">
-                          {denom.language}
+                          {denom.languageDescription || denom.language || ''}
                         </span>
                       </div>
                       <div className="flex-1">
-                        <p className="text-sm text-gray-600">Type: {denom.typeCode}</p>
+                        <p className="text-sm text-gray-600">
+                          Type: {denom.typeCode}
+                          {denom.typeDescription && ` - ${denom.typeDescription}`}
+                        </p>
                         <p className="font-medium">{denom.denomination}</p>
                       </div>
                       <div className="flex items-center">

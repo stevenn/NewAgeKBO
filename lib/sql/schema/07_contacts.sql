@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS contacts (
 
   -- Temporal tracking
   _is_current BOOLEAN NOT NULL,               -- TRUE for current, FALSE for historical
+  _deleted_at_extract INTEGER,                -- Update Set number when this record was deleted (NULL if current)
 
   -- Composite primary key to support temporal tracking
   PRIMARY KEY (id, _snapshot_date, _extract_number),
@@ -27,7 +28,13 @@ CREATE TABLE IF NOT EXISTS contacts (
 );
 
 -- Comments for documentation
-COMMENT ON TABLE contacts IS 'Contact info (~690K) - phone, email, website';
+COMMENT ON TABLE contacts IS 'Contact info (~690K) - phone, email, website. Supports temporal versioning for historical queries.';
+COMMENT ON COLUMN contacts.id IS 'Composite key: entity_number_entity_contact_type_hash(value). Ensures uniqueness across versions.';
+COMMENT ON COLUMN contacts._snapshot_date IS 'Date of KBO data snapshot (part of composite PK for temporal tracking)';
+COMMENT ON COLUMN contacts._extract_number IS 'Monotonic extract number for version ordering (part of composite PK)';
+COMMENT ON COLUMN contacts.entity_number IS 'Enterprise or establishment number (FK to either table)';
 COMMENT ON COLUMN contacts.entity_contact IS 'ENT, ESTB, or BRANCH';
 COMMENT ON COLUMN contacts.contact_type IS 'TEL, EMAIL, WEB';
 COMMENT ON COLUMN contacts.contact_value IS 'Phone, email, or URL';
+COMMENT ON COLUMN contacts._is_current IS 'TRUE for current version (highest extract number), FALSE for historical versions';
+COMMENT ON COLUMN contacts._deleted_at_extract IS 'Extract number when this record was superseded. NULL if current or never superseded. NOTE: Not populated by import scripts (added 2025-10-26), documented limitation.';

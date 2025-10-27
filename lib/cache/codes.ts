@@ -126,6 +126,31 @@ export async function getStatusDescription(
 }
 
 /**
+ * Get denomination type description
+ */
+export async function getDenominationTypeDescription(
+  code: string | null | undefined,
+  language: string = 'NL'
+): Promise<string | null> {
+  return getCodeDescription('TypeOfDenomination', code, language)
+}
+
+/**
+ * Get language abbreviation (NL, FR, DE, EN)
+ * Maps numeric language codes to their standard abbreviations
+ */
+export function getLanguageAbbreviation(code: string | null | undefined): string {
+  const languageMap: Record<string, string> = {
+    '0': '', // Unknown - show nothing
+    '1': 'FR',
+    '2': 'NL',
+    '3': 'DE',
+    '4': 'EN',
+  }
+  return code ? (languageMap[code] || code) : ''
+}
+
+/**
  * Clear the cache (useful for testing or if codes are updated)
  */
 export function clearCodesCache(): void {

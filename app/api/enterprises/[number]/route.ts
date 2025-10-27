@@ -25,7 +25,9 @@ export interface EnterpriseDetail {
 
 export interface Denomination {
   language: string
+  languageDescription: string | null
   typeCode: string
+  typeDescription: string | null
   denomination: string
 }
 

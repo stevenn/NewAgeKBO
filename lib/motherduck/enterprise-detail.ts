@@ -8,6 +8,7 @@ import {
   buildTemporalFilter,
   type TemporalFilter
 } from './temporal-query'
+import { getDenominationTypeDescription, getLanguageAbbreviation } from '@/lib/cache/codes'
 
 /**
  * Fetches complete enterprise details with all related data
@@ -129,7 +130,7 @@ export async function fetchEnterpriseDetail(
         enterpriseNumber,
         filter,
         'denomination_type, language',
-        'id'
+        'entity_number, language, denomination_type'
       )
     ),
 
@@ -297,11 +298,15 @@ export async function fetchEnterpriseDetail(
     snapshotDate: enterprise._snapshot_date,
     extractNumber: enterprise._extract_number,
 
-    denominations: denominations.map((d) => ({
-      language: d.language,
-      typeCode: d.denomination_type,
-      denomination: d.denomination,
-    })),
+    denominations: await Promise.all(
+      denominations.map(async (d) => ({
+        language: d.language,
+        languageDescription: getLanguageAbbreviation(d.language),
+        typeCode: d.denomination_type,
+        typeDescription: await getDenominationTypeDescription(d.denomination_type),
+        denomination: d.denomination,
+      }))
+    ),
 
     addresses: addresses.map((a) => ({
       typeCode: a.type_of_address,

@@ -27,17 +27,22 @@ CREATE TABLE IF NOT EXISTS enterprises (
 
   -- Temporal tracking
   _is_current BOOLEAN NOT NULL,               -- TRUE for current, FALSE for historical
+  _deleted_at_extract INTEGER,                -- Update Set number when this record was deleted (NULL if current)
 
   -- Composite primary key to support temporal tracking
   PRIMARY KEY (enterprise_number, _snapshot_date, _extract_number)
 );
 
 -- Comments for documentation
-COMMENT ON TABLE enterprises IS 'Belgian enterprises (~2M) with primary names';
+COMMENT ON TABLE enterprises IS 'Belgian enterprises (~2M) with primary names. Supports temporal versioning for historical queries.';
+COMMENT ON COLUMN enterprises.enterprise_number IS 'Unique enterprise identifier (format: 9999.999.999)';
+COMMENT ON COLUMN enterprises._snapshot_date IS 'Date of KBO data snapshot (part of composite PK for temporal tracking)';
+COMMENT ON COLUMN enterprises._extract_number IS 'Monotonic extract number for version ordering (part of composite PK)';
 COMMENT ON COLUMN enterprises.status IS 'AC=Active, ST=Stopped';
 COMMENT ON COLUMN enterprises.primary_name IS 'Primary name in any language - never NULL, for display';
 COMMENT ON COLUMN enterprises.primary_name_language IS 'Language of primary_name: 0=Unknown, 1=FR, 2=NL, 3=DE, 4=EN';
 COMMENT ON COLUMN enterprises.primary_name_nl IS 'Dutch version if available, else NULL';
 COMMENT ON COLUMN enterprises.primary_name_fr IS 'French version if available, else NULL';
 COMMENT ON COLUMN enterprises.primary_name_de IS 'German version if available, else NULL';
-COMMENT ON COLUMN enterprises._is_current IS 'Current version flag';
+COMMENT ON COLUMN enterprises._is_current IS 'TRUE for current version (highest extract number), FALSE for historical versions';
+COMMENT ON COLUMN enterprises._deleted_at_extract IS 'Extract number when this record was superseded. NULL if current or never superseded. NOTE: Not populated by import scripts (added 2025-10-26), documented limitation.';

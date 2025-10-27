@@ -272,6 +272,52 @@ Several data types that third-party services (like kbodata.app API) provide are 
 - EU VIES VAT number validation
 - **Source**: European Commission VIES service
 
+### Known Implementation Limitations
+
+#### Temporal Versioning - Deletion Tracking
+
+The `_deleted_at_extract` column exists in all temporal table schemas but is **NOT populated** by import scripts.
+
+**What it should do**: Track when a record version was superseded by a newer version, enabling precise point-in-time reconstruction.
+
+**Current state**:
+- Column added to schema (October 2025)
+- Not populated during imports (all values are NULL)
+- Documented limitation for future improvement
+
+**Impact**:
+- Point-in-time queries work correctly for most cases
+- Some edge cases may return incorrect results when multiple versions exist with different natural keys
+- Workaround implemented using partition key strategies
+
+**Workaround in use**:
+Instead of relying on `_deleted_at_extract`, point-in-time queries partition by natural keys:
+```sql
+-- Example: Denominations partitioned by (entity_number, language, denomination_type)
+ROW_NUMBER() OVER (
+  PARTITION BY entity_number, language, denomination_type
+  ORDER BY _extract_number DESC, _snapshot_date DESC
+) as rn
+```
+
+This ensures only the latest version within each partition is returned, avoiding duplicates even without deletion tracking.
+
+**Future improvement**: Implement `_deleted_at_extract` population in import pipeline refactor (Phase 4+).
+
+#### Historical Data Retention
+
+- Only current snapshot + monthly snapshots are retained
+- Daily updates are not kept after next monthly snapshot
+- No ability to query state at arbitrary daily dates between monthly snapshots
+- By design: balances storage cost vs. historical query capability
+
+#### Search Performance
+
+- Full-text search uses simple LIKE queries (case-insensitive)
+- No advanced ranking or fuzzy matching
+- For production, consider external search service (Typesense, MeiliSearch)
+- Current approach acceptable for admin UI with limited concurrent users
+
 ❌ **Historical financial statements** - NOT in KBO Open Data
 - Annual accounts, balance sheets
 - **Source**: National Bank of Belgium
