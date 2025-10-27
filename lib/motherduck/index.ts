@@ -61,9 +61,8 @@ export function createConnectionString(
  * Connect to Motherduck
  * Returns a Promise that resolves to a DuckDB database connection
  *
- * For serverless environments (Vercel), we use an in-memory database
- * and set the motherduck_token via environment variable to avoid
- * filesystem access during connection initialization.
+ * For serverless environments (Vercel), we configure DuckDB to use /tmp
+ * for all filesystem operations and disable extension autoloading.
  */
 export async function connectMotherduck(
   config?: MotherduckConfig
@@ -72,12 +71,10 @@ export async function connectMotherduck(
   const mdConfig = config || getMotherduckConfig()
 
   // Set Motherduck token as environment variable for DuckDB to use
-  // This avoids the need to store credentials in home directory
   process.env.motherduck_token = mdConfig.token
 
   return new Promise((resolve, reject) => {
-    // Use in-memory database (:memory:) to avoid filesystem issues in serverless
-    // DuckDB will use the motherduck_token environment variable automatically
+    // Use in-memory database to avoid local filesystem for data
     const db = new DuckDB.Database(':memory:', (err) => {
       if (err) {
         reject(
@@ -86,8 +83,41 @@ export async function connectMotherduck(
             err
           )
         )
-      } else {
-        // Attach to Motherduck database using the environment variable
+        return
+      }
+
+      // Configure DuckDB for serverless before attaching to Motherduck
+      const configStatements = [
+        // Set all directory paths to /tmp (writable in Vercel)
+        "SET home_directory='/tmp'",
+        "SET extension_directory='/tmp/.duckdb/extensions'",
+        "SET temp_directory='/tmp'",
+        // Disable extension autoloading to avoid home directory access
+        "SET autoinstall_known_extensions=false",
+        "SET autoload_known_extensions=false",
+      ]
+
+      // Execute all config statements sequentially
+      const executeConfigs = async () => {
+        for (const sql of configStatements) {
+          try {
+            await new Promise<void>((resolveStmt, rejectStmt) => {
+              db.run(sql, (stmtErr) => {
+                if (stmtErr) {
+                  console.warn(`Warning: ${sql} failed:`, stmtErr.message)
+                  // Don't reject - some settings might not be available
+                  resolveStmt()
+                } else {
+                  resolveStmt()
+                }
+              })
+            })
+          } catch (e) {
+            console.warn(`Config statement failed: ${sql}`, e)
+          }
+        }
+
+        // Now attach to Motherduck
         const attachSql = mdConfig.database
           ? `ATTACH 'md:${mdConfig.database}' AS md`
           : `ATTACH 'md:' AS md`
@@ -105,6 +135,8 @@ export async function connectMotherduck(
           }
         })
       }
+
+      executeConfigs().catch(reject)
     })
   })
 }
