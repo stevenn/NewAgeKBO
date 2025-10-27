@@ -2,6 +2,9 @@
  * In-memory cache for KBO codes table
  * The codes table is static (21,501 rows) and never changes per snapshot
  * Caching eliminates expensive JOINs at query time
+ *
+ * Note: This module is server-side only and should not be imported by client components.
+ * The cache is populated at runtime and not serialized by webpack.
  */
 
 import { connectMotherduck, closeMotherduck, executeQuery } from '@/lib/motherduck'
@@ -9,6 +12,7 @@ import { connectMotherduck, closeMotherduck, executeQuery } from '@/lib/motherdu
 // Cache structure: category -> code -> language -> description
 type CodesCache = Map<string, Map<string, Map<string, string>>>
 
+// Runtime-only cache - not serializable, populated on first request
 let codesCache: CodesCache | null = null
 let cacheInitializing: Promise<void> | null = null
 
