@@ -92,24 +92,18 @@ export async function connectMotherduck(
         "SET home_directory='/tmp'",
         "SET extension_directory='/tmp/.duckdb/extensions'",
         "SET temp_directory='/tmp'",
-        // Disable extension autoloading to avoid home directory access
-        "SET autoinstall_known_extensions=false",
-        "SET autoload_known_extensions=false",
       ]
 
       // Execute all config statements sequentially
       const executeConfigs = async () => {
         for (const sql of configStatements) {
           try {
-            await new Promise<void>((resolveStmt, rejectStmt) => {
+            await new Promise<void>((resolveStmt) => {
               db.run(sql, (stmtErr) => {
                 if (stmtErr) {
                   console.warn(`Warning: ${sql} failed:`, stmtErr.message)
-                  // Don't reject - some settings might not be available
-                  resolveStmt()
-                } else {
-                  resolveStmt()
                 }
+                resolveStmt()
               })
             })
           } catch (e) {
@@ -117,7 +111,34 @@ export async function connectMotherduck(
           }
         }
 
-        // Now attach to Motherduck
+        // Install Motherduck extension explicitly
+        await new Promise<void>((resolveInstall, rejectInstall) => {
+          db.run("INSTALL motherduck", (installErr) => {
+            if (installErr) {
+              // Extension might already be installed
+              console.log('Motherduck extension install:', installErr.message)
+            }
+            resolveInstall()
+          })
+        })
+
+        // Load the Motherduck extension
+        await new Promise<void>((resolveLoad, rejectLoad) => {
+          db.run("LOAD motherduck", (loadErr) => {
+            if (loadErr) {
+              rejectLoad(
+                new MotherduckError(
+                  `Failed to load Motherduck extension: ${loadErr.message}`,
+                  loadErr
+                )
+              )
+            } else {
+              resolveLoad()
+            }
+          })
+        })
+
+        // Now attach to Motherduck database
         const attachSql = mdConfig.database
           ? `ATTACH 'md:${mdConfig.database}' AS md`
           : `ATTACH 'md:' AS md`
