@@ -71,6 +71,8 @@ export async function connectMotherduck(
   const connectionString = createConnectionString(mdConfig, false)
 
   return new Promise((resolve, reject) => {
+    // Create connection - DuckDB Node.js API takes (path, callback) or (path, config, callback)
+    // For Motherduck, we pass the connection string directly
     const db = new DuckDB.Database(connectionString, (err) => {
       if (err) {
         reject(
@@ -80,7 +82,15 @@ export async function connectMotherduck(
           )
         )
       } else {
-        resolve(db)
+        // Set home directory to /tmp for serverless environments (Vercel)
+        // This prevents DuckDB from trying to access the user's home directory
+        db.run("SET home_directory='/tmp'", (setErr) => {
+          if (setErr) {
+            console.warn('Warning: Could not set home directory:', setErr.message)
+            // Continue anyway - Motherduck might not need home directory
+          }
+          resolve(db)
+        })
       }
     })
   })
