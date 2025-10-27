@@ -15,29 +15,29 @@ export interface EnterpriseComparison {
   typeOfEnterprise: FieldChange
   startDate: FieldChange
   denominations: {
-    added: typeof EnterpriseDetail.prototype.denominations
-    removed: typeof EnterpriseDetail.prototype.denominations
-    unchanged: typeof EnterpriseDetail.prototype.denominations
+    added: EnterpriseDetail['denominations']
+    removed: EnterpriseDetail['denominations']
+    unchanged: EnterpriseDetail['denominations']
   }
   addresses: {
-    added: typeof EnterpriseDetail.prototype.addresses
-    removed: typeof EnterpriseDetail.prototype.addresses
-    unchanged: typeof EnterpriseDetail.prototype.addresses
+    added: EnterpriseDetail['addresses']
+    removed: EnterpriseDetail['addresses']
+    unchanged: EnterpriseDetail['addresses']
   }
   activities: {
-    added: typeof EnterpriseDetail.prototype.activities
-    removed: typeof EnterpriseDetail.prototype.activities
-    unchanged: typeof EnterpriseDetail.prototype.activities
+    added: EnterpriseDetail['activities']
+    removed: EnterpriseDetail['activities']
+    unchanged: EnterpriseDetail['activities']
   }
   contacts: {
-    added: typeof EnterpriseDetail.prototype.contacts
-    removed: typeof EnterpriseDetail.prototype.contacts
-    unchanged: typeof EnterpriseDetail.prototype.contacts
+    added: EnterpriseDetail['contacts']
+    removed: EnterpriseDetail['contacts']
+    unchanged: EnterpriseDetail['contacts']
   }
   establishments: {
-    added: typeof EnterpriseDetail.prototype.establishments
-    removed: typeof EnterpriseDetail.prototype.establishments
-    unchanged: typeof EnterpriseDetail.prototype.establishments
+    added: EnterpriseDetail['establishments']
+    removed: EnterpriseDetail['establishments']
+    unchanged: EnterpriseDetail['establishments']
   }
 }
 
