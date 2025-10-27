@@ -1,6 +1,9 @@
 import { Suspense } from 'react'
 import { DatabaseStats } from './stats'
 
+// Force dynamic rendering - this page requires database connection at runtime
+export const dynamic = 'force-dynamic'
+
 export default function DashboardPage() {
   return (
     <div>
