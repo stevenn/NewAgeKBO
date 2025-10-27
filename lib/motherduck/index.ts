@@ -60,36 +60,49 @@ export function createConnectionString(
 /**
  * Connect to Motherduck
  * Returns a Promise that resolves to a DuckDB database connection
- * Note: Connects without attaching to a specific database initially
+ *
+ * For serverless environments (Vercel), we use an in-memory database
+ * and set the motherduck_token via environment variable to avoid
+ * filesystem access during connection initialization.
  */
 export async function connectMotherduck(
   config?: MotherduckConfig
 ): Promise<import('duckdb').Database> {
   const DuckDB = await getDuckDB()
   const mdConfig = config || getMotherduckConfig()
-  // Connect without specifying database - we'll create/attach it later
-  const connectionString = createConnectionString(mdConfig, false)
+
+  // Set Motherduck token as environment variable for DuckDB to use
+  // This avoids the need to store credentials in home directory
+  process.env.motherduck_token = mdConfig.token
 
   return new Promise((resolve, reject) => {
-    // Create connection - DuckDB Node.js API takes (path, callback) or (path, config, callback)
-    // For Motherduck, we pass the connection string directly
-    const db = new DuckDB.Database(connectionString, (err) => {
+    // Use in-memory database (:memory:) to avoid filesystem issues in serverless
+    // DuckDB will use the motherduck_token environment variable automatically
+    const db = new DuckDB.Database(':memory:', (err) => {
       if (err) {
         reject(
           new MotherduckError(
-            `Failed to connect to Motherduck: ${err.message}`,
+            `Failed to initialize DuckDB: ${err.message}`,
             err
           )
         )
       } else {
-        // Set home directory to /tmp for serverless environments (Vercel)
-        // This prevents DuckDB from trying to access the user's home directory
-        db.run("SET home_directory='/tmp'", (setErr) => {
-          if (setErr) {
-            console.warn('Warning: Could not set home directory:', setErr.message)
-            // Continue anyway - Motherduck might not need home directory
+        // Attach to Motherduck database using the environment variable
+        const attachSql = mdConfig.database
+          ? `ATTACH 'md:${mdConfig.database}' AS md`
+          : `ATTACH 'md:' AS md`
+
+        db.run(attachSql, (attachErr) => {
+          if (attachErr) {
+            reject(
+              new MotherduckError(
+                `Failed to attach to Motherduck: ${attachErr.message}`,
+                attachErr
+              )
+            )
+          } else {
+            resolve(db)
           }
-          resolve(db)
         })
       }
     })
