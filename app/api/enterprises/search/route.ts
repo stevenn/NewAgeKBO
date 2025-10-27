@@ -24,8 +24,8 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url)
     const query = searchParams.get('q') || ''
     const searchType = searchParams.get('type') || 'all' // all, number, name, nace
-    const limit = Math.min(parseInt(searchParams.get('limit') || '50'), 200)
-    const offset = parseInt(searchParams.get('offset') || '0')
+    const limit = Math.min(Math.max(parseInt(searchParams.get('limit') || '50') || 50, 1), 200)
+    const offset = Math.max(parseInt(searchParams.get('offset') || '0') || 0, 0)
 
     if (!query && searchType !== 'all') {
       return NextResponse.json({ results: [], total: 0 })
@@ -206,17 +206,14 @@ export async function GET(request: Request) {
         }))
       )
 
-      await closeMotherduck(db)
-
       return NextResponse.json({
         results: formattedResults,
         total,
         limit,
         offset,
       })
-    } catch (error) {
+    } finally {
       await closeMotherduck(db)
-      throw error
     }
   } catch (error) {
     console.error('Failed to search enterprises:', error)

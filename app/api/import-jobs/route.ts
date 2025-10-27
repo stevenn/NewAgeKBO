@@ -83,12 +83,9 @@ export async function GET() {
         workerType: row.worker_type,
       }))
 
-      await closeMotherduck(db)
-
       return NextResponse.json({ jobs })
-    } catch (error) {
+    } finally {
       await closeMotherduck(db)
-      throw error
     }
   } catch (error) {
     console.error('Failed to fetch import jobs:', error)

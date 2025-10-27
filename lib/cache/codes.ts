@@ -63,6 +63,10 @@ async function initializeCache(): Promise<void> {
       const duration = Date.now() - startTime
       console.log(`[CodesCache] Initialized ${results.length} codes in ${duration}ms`)
       console.log(`[CodesCache] Categories: ${Array.from(cache.keys()).join(', ')}`)
+    } catch (error) {
+      console.error('[CodesCache] Failed to initialize cache:', error)
+      cacheInitializing = null // Reset so it can be retried
+      throw error
     } finally {
       await closeMotherduck(db)
     }

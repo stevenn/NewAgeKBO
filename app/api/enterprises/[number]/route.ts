@@ -88,7 +88,7 @@ export async function GET(
     const filter = extractNumber
       ? {
           type: 'point-in-time' as const,
-          extractNumber: parseInt(extractNumber),
+          extractNumber: Math.max(parseInt(extractNumber) || 0, 0),
           snapshotDate: snapshotDate || undefined,
         }
       : { type: 'current' as const }
@@ -105,15 +105,12 @@ export async function GET(
       const detail = await fetchEnterpriseDetail(db, number, filter)
 
       if (!detail) {
-        await closeMotherduck(db)
         return NextResponse.json({ error: 'Enterprise not found' }, { status: 404 })
       }
 
-      await closeMotherduck(db)
       return NextResponse.json(detail)
-    } catch (error) {
+    } finally {
       await closeMotherduck(db)
-      throw error
     }
   } catch (error) {
     console.error('Failed to fetch enterprise details:', error)

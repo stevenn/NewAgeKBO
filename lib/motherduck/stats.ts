@@ -194,11 +194,8 @@ export async function getDatabaseStats(): Promise<DatabaseStats> {
       provinceDistribution: provinceStats,
     }
 
-    await closeMotherduck(db)
-
     return stats
-  } catch (error) {
+  } finally {
     await closeMotherduck(db)
-    throw error
   }
 }

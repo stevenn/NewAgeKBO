@@ -67,7 +67,6 @@ export async function GET(
       )
 
       if (snapshots.length === 0) {
-        await closeMotherduck(db)
         return NextResponse.json({ error: 'Enterprise not found' }, { status: 404 })
       }
 
@@ -77,14 +76,11 @@ export async function GET(
         isCurrent: s._is_current,
       }))
 
-      await closeMotherduck(db)
-
       return NextResponse.json({
         snapshots: formattedSnapshots,
       })
-    } catch (error) {
+    } finally {
       await closeMotherduck(db)
-      throw error
     }
   } catch (error) {
     console.error('Failed to fetch enterprise snapshots:', error)
