@@ -94,15 +94,12 @@ export async function GET(
       : { type: 'current' as const }
 
     // Connect to Motherduck
-    const db = await connectMotherduck()
+    const connection = await connectMotherduck()
 
     try {
-      const dbName = process.env.MOTHERDUCK_DATABASE || 'kbo'
-      await executeQuery(db, `USE ${dbName}`)
-
       // Use shared helper function to fetch enterprise details
       const { fetchEnterpriseDetail } = await import('@/lib/motherduck/enterprise-detail')
-      const detail = await fetchEnterpriseDetail(db, number, filter)
+      const detail = await fetchEnterpriseDetail(connection, number, filter)
 
       if (!detail) {
         return NextResponse.json({ error: 'Enterprise not found' }, { status: 404 })
@@ -110,7 +107,7 @@ export async function GET(
 
       return NextResponse.json(detail)
     } finally {
-      await closeMotherduck(db)
+      await closeMotherduck(connection)
     }
   } catch (error) {
     console.error('Failed to fetch enterprise details:', error)

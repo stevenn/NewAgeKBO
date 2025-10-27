@@ -1,21 +1,13 @@
 /**
  * Motherduck connection utilities
- * Wraps DuckDB Node.js client with Motherduck-specific configuration
+ * Uses @duckdb/node-api for serverless compatibility
  *
- * Note: Uses dynamic import for DuckDB to avoid loading native module during build
+ * Note: Uses @duckdb/node-api which works in Vercel serverless functions
  */
 
+import { DuckDBInstance } from '@duckdb/node-api'
+import type { DuckDBConnection } from '@duckdb/node-api'
 import { MotherduckError } from '@/lib/errors'
-
-// Lazy-load DuckDB at runtime to avoid build-time native module loading
-let duckdb: typeof import('duckdb') | null = null
-
-async function getDuckDB() {
-  if (!duckdb) {
-    duckdb = await import('duckdb')
-  }
-  return duckdb
-}
 
 /**
  * Motherduck connection configuration
@@ -50,177 +42,125 @@ export function createConnectionString(
   config: MotherduckConfig,
   includeDatabase: boolean = true
 ): string {
-  const { token, database } = config
+  const { database } = config
   if (includeDatabase && database) {
-    return `md:${database}?motherduck_token=${token}`
+    return `md:${database}`
   }
-  return `md:?motherduck_token=${token}`
+  return `md:`
 }
 
 /**
  * Connect to Motherduck
- * Returns a Promise that resolves to a DuckDB database connection
+ * Returns a Promise that resolves to a DuckDB connection
  *
- * For serverless environments (Vercel), we configure DuckDB to use /tmp
- * for all filesystem operations and disable extension autoloading.
+ * For serverless environments (Vercel), we use @duckdb/node-api which
+ * has better compatibility with serverless platforms.
  */
 export async function connectMotherduck(
   config?: MotherduckConfig
-): Promise<import('duckdb').Database> {
-  const DuckDB = await getDuckDB()
+): Promise<DuckDBConnection> {
   const mdConfig = config || getMotherduckConfig()
 
-  // Set Motherduck token as environment variable for DuckDB to use
-  process.env.motherduck_token = mdConfig.token
+  try {
+    console.log(`Connecting to Motherduck with database: ${mdConfig.database}`)
 
-  return new Promise((resolve, reject) => {
-    // Use in-memory database to avoid local filesystem for data
-    const db = new DuckDB.Database(':memory:', (err) => {
-      if (err) {
-        reject(
-          new MotherduckError(
-            `Failed to initialize DuckDB: ${err.message}`,
-            err
-          )
-        )
-        return
-      }
+    // Create connection string
+    const connectionString = createConnectionString(mdConfig, true)
 
-      // Configure DuckDB for serverless before attaching to Motherduck
-      const configStatements = [
-        // Set all directory paths to /tmp (writable in Vercel)
-        "SET home_directory='/tmp'",
-        "SET extension_directory='/tmp/.duckdb/extensions'",
-        "SET temp_directory='/tmp'",
-      ]
-
-      // Execute all config statements sequentially
-      const executeConfigs = async () => {
-        for (const sql of configStatements) {
-          try {
-            await new Promise<void>((resolveStmt) => {
-              db.run(sql, (stmtErr) => {
-                if (stmtErr) {
-                  console.warn(`Warning: ${sql} failed:`, stmtErr.message)
-                }
-                resolveStmt()
-              })
-            })
-          } catch (e) {
-            console.warn(`Config statement failed: ${sql}`, e)
-          }
-        }
-
-        // Install Motherduck extension explicitly
-        await new Promise<void>((resolveInstall, rejectInstall) => {
-          db.run("INSTALL motherduck", (installErr) => {
-            if (installErr) {
-              // Extension might already be installed
-              console.log('Motherduck extension install:', installErr.message)
-            }
-            resolveInstall()
-          })
-        })
-
-        // Load the Motherduck extension
-        await new Promise<void>((resolveLoad, rejectLoad) => {
-          db.run("LOAD motherduck", (loadErr) => {
-            if (loadErr) {
-              rejectLoad(
-                new MotherduckError(
-                  `Failed to load Motherduck extension: ${loadErr.message}`,
-                  loadErr
-                )
-              )
-            } else {
-              resolveLoad()
-            }
-          })
-        })
-
-        // Now attach to Motherduck database
-        const attachSql = mdConfig.database
-          ? `ATTACH 'md:${mdConfig.database}' AS md`
-          : `ATTACH 'md:' AS md`
-
-        db.run(attachSql, (attachErr) => {
-          if (attachErr) {
-            reject(
-              new MotherduckError(
-                `Failed to attach to Motherduck: ${attachErr.message}`,
-                attachErr
-              )
-            )
-          } else {
-            resolve(db)
-          }
-        })
-      }
-
-      executeConfigs().catch(reject)
+    // Create DuckDB instance with Motherduck connection
+    const instance = await DuckDBInstance.create(connectionString, {
+      motherduck_token: mdConfig.token,
     })
-  })
+
+    // Create connection
+    const connection = await instance.connect()
+
+    // CRITICAL: Set home_directory for serverless environments
+    // This must be done before any operations that might need filesystem access
+    await connection.run("SET home_directory='/tmp'")
+
+    console.log(`Successfully connected to Motherduck database: ${mdConfig.database}`)
+
+    return connection
+  } catch (error) {
+    throw new MotherduckError(
+      `Failed to connect to Motherduck: ${error instanceof Error ? error.message : String(error)}`,
+      error instanceof Error ? error : undefined
+    )
+  }
 }
 
 /**
  * Execute a SQL query
  */
 export async function executeQuery<T = unknown>(
-  db: import('duckdb').Database,
+  connection: DuckDBConnection,
   sql: string
 ): Promise<T[]> {
-  return new Promise((resolve, reject) => {
-    db.all(sql, (err, rows) => {
-      if (err) {
-        reject(
-          new MotherduckError(`Query execution failed: ${err.message}`, err)
-        )
-      } else {
-        resolve(rows as T[])
+  try {
+    const result = await connection.run(sql)
+    const chunks = await result.fetchAllChunks()
+
+    // Get column names from the result
+    const columnNames = result.columnNames()
+
+    // Get rows as array of objects
+    const rows: T[] = []
+    for (const chunk of chunks) {
+      // Get rows as arrays
+      const rowArrays = chunk.getRows()
+      // Convert to objects using column names
+      for (const rowArray of rowArrays) {
+        const rowObject: Record<string, unknown> = {}
+        columnNames.forEach((colName, idx) => {
+          rowObject[colName] = rowArray[idx]
+        })
+        rows.push(rowObject as T)
       }
-    })
-  })
+    }
+
+    return rows
+  } catch (error) {
+    throw new MotherduckError(
+      `Query execution failed: ${error instanceof Error ? error.message : String(error)}`,
+      error instanceof Error ? error : undefined
+    )
+  }
 }
 
 /**
  * Execute a SQL statement (no results expected)
  */
 export async function executeStatement(
-  db: import('duckdb').Database,
+  connection: DuckDBConnection,
   sql: string
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    db.run(sql, (err) => {
-      if (err) {
-        reject(
-          new MotherduckError(
-            `Statement execution failed: ${err.message}`,
-            err
-          )
-        )
-      } else {
-        resolve()
-      }
-    })
-  })
+  try {
+    await connection.run(sql)
+  } catch (error) {
+    throw new MotherduckError(
+      `Statement execution failed: ${error instanceof Error ? error.message : String(error)}`,
+      error instanceof Error ? error : undefined
+    )
+  }
 }
 
 /**
  * Execute multiple SQL statements in a transaction
  */
 export async function executeTransaction(
-  db: import('duckdb').Database,
+  connection: DuckDBConnection,
   statements: string[]
 ): Promise<void> {
-  await executeStatement(db, 'BEGIN TRANSACTION')
+  await executeStatement(connection, 'BEGIN TRANSACTION')
 
   try {
     for (const sql of statements) {
-      await executeStatement(db, sql)
+      await executeStatement(connection, sql)
     }
-    await executeStatement(db, 'COMMIT')
+    await executeStatement(connection, 'COMMIT')
   } catch (error) {
-    await executeStatement(db, 'ROLLBACK')
+    await executeStatement(connection, 'ROLLBACK')
     throw error
   }
 }
@@ -228,29 +168,26 @@ export async function executeTransaction(
 /**
  * Close database connection
  */
-export async function closeMotherduck(db: import('duckdb').Database): Promise<void> {
-  return new Promise((resolve, reject) => {
-    db.close((err) => {
-      if (err) {
-        reject(
-          new MotherduckError(`Failed to close connection: ${err.message}`, err)
-        )
-      } else {
-        resolve()
-      }
-    })
-  })
+export async function closeMotherduck(connection: DuckDBConnection): Promise<void> {
+  try {
+    connection.closeSync()
+  } catch (error) {
+    throw new MotherduckError(
+      `Failed to close connection: ${error instanceof Error ? error.message : String(error)}`,
+      error instanceof Error ? error : undefined
+    )
+  }
 }
 
 /**
  * Check if database exists
  */
 export async function databaseExists(
-  db: import('duckdb').Database,
+  connection: DuckDBConnection,
   dbName: string
 ): Promise<boolean> {
   const result = await executeQuery<{ database_name: string }>(
-    db,
+    connection,
     'SHOW DATABASES'
   )
   return result.some((row) => row.database_name === dbName)
@@ -260,13 +197,13 @@ export async function databaseExists(
  * Create database if it doesn't exist
  */
 export async function ensureDatabase(
-  db: import('duckdb').Database,
+  connection: DuckDBConnection,
   dbName: string
 ): Promise<void> {
-  const exists = await databaseExists(db, dbName)
+  const exists = await databaseExists(connection, dbName)
 
   if (!exists) {
-    await executeStatement(db, `CREATE DATABASE IF NOT EXISTS ${dbName}`)
+    await executeStatement(connection, `CREATE DATABASE IF NOT EXISTS ${dbName}`)
     console.log(`Created database: ${dbName}`)
   }
 }
@@ -275,11 +212,11 @@ export async function ensureDatabase(
  * Check if table exists
  */
 export async function tableExists(
-  db: import('duckdb').Database,
+  connection: DuckDBConnection,
   tableName: string
 ): Promise<boolean> {
   const result = await executeQuery<{ table_name: string }>(
-    db,
+    connection,
     "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
   )
   return result.some((row) => row.table_name === tableName)
@@ -289,11 +226,11 @@ export async function tableExists(
  * Get table row count
  */
 export async function getTableCount(
-  db: import('duckdb').Database,
+  connection: DuckDBConnection,
   tableName: string
 ): Promise<number> {
   const result = await executeQuery<{ count: number }>(
-    db,
+    connection,
     `SELECT COUNT(*) as count FROM ${tableName}`
   )
   return result[0]?.count || 0
@@ -303,11 +240,11 @@ export async function getTableCount(
  * Get database statistics
  */
 export async function getDatabaseStats(
-  db: import('duckdb').Database
+  connection: DuckDBConnection
 ): Promise<{ table_name: string; row_count: number }[]> {
   try {
     const tables = await executeQuery<{ table_name: string }>(
-      db,
+      connection,
       "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
     )
 
@@ -318,7 +255,7 @@ export async function getDatabaseStats(
         continue
       }
       try {
-        const count = await getTableCount(db, table_name)
+        const count = await getTableCount(connection, table_name)
         stats.push({ table_name, row_count: count })
       } catch {
         // Skip tables that can't be counted

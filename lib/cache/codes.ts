@@ -33,18 +33,15 @@ async function initializeCache(): Promise<void> {
     console.log('[CodesCache] Initializing codes cache...')
     const startTime = Date.now()
 
-    const db = await connectMotherduck()
+    const connection = await connectMotherduck()
 
     try {
-      const dbName = process.env.MOTHERDUCK_DATABASE || 'kbo'
-      await executeQuery(db, `USE ${dbName}`)
-
       const results = await executeQuery<{
         category: string
         code: string
         language: string
         description: string
-      }>(db, 'SELECT category, code, language, description FROM codes')
+      }>(connection, 'SELECT category, code, language, description FROM codes')
 
       const cache: CodesCache = new Map()
 
@@ -72,7 +69,7 @@ async function initializeCache(): Promise<void> {
       cacheInitializing = null // Reset so it can be retried
       throw error
     } finally {
-      await closeMotherduck(db)
+      await closeMotherduck(connection)
     }
   })()
 

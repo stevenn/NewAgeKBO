@@ -25,12 +25,9 @@ export async function GET() {
     if (authError) return authError
 
     // Connect to Motherduck
-    const db = await connectMotherduck()
+    const connection = await connectMotherduck()
 
     try {
-      const dbName = process.env.MOTHERDUCK_DATABASE || 'kbo'
-      await executeQuery(db, `USE ${dbName}`)
-
       // Fetch import jobs ordered by most recent first
       const results = await executeQuery<{
         id: string
@@ -47,7 +44,7 @@ export async function GET() {
         error_message: string | null
         worker_type: string
       }>(
-        db,
+        connection,
         `SELECT
           id,
           extract_number,
@@ -85,7 +82,7 @@ export async function GET() {
 
       return NextResponse.json({ jobs })
     } finally {
-      await closeMotherduck(db)
+      await closeMotherduck(connection)
     }
   } catch (error) {
     console.error('Failed to fetch import jobs:', error)

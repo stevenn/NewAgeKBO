@@ -20,12 +20,9 @@ export async function GET(
     const { number } = await params
 
     // Connect to Motherduck
-    const db = await connectMotherduck()
+    const connection = await connectMotherduck()
 
     try {
-      const dbName = process.env.MOTHERDUCK_DATABASE || 'kbo'
-      await executeQuery(db, `USE ${dbName}`)
-
       // Fetch all snapshots for this enterprise
       // Check all tables because in incremental updates, only changed records appear
       // (e.g., if only a denomination changed, the enterprise record won't be in that extract)
@@ -34,7 +31,7 @@ export async function GET(
         _extract_number: number
         _is_current: boolean
       }>(
-        db,
+        connection,
         `WITH all_extracts AS (
           SELECT DISTINCT _extract_number, _snapshot_date
           FROM enterprises WHERE enterprise_number = '${number}'
@@ -80,7 +77,7 @@ export async function GET(
         snapshots: formattedSnapshots,
       })
     } finally {
-      await closeMotherduck(db)
+      await closeMotherduck(connection)
     }
   } catch (error) {
     console.error('Failed to fetch enterprise snapshots:', error)

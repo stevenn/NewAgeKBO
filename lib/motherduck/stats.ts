@@ -43,15 +43,14 @@ export interface DatabaseStats {
 }
 
 export async function getDatabaseStats(): Promise<DatabaseStats> {
-  const db = await connectMotherduck()
+  const connection = await connectMotherduck()
 
   try {
     const dbName = process.env.MOTHERDUCK_DATABASE || 'kbo'
-    await executeQuery(db, `USE ${dbName}`)
 
     // Get latest extract number and snapshot date
     const extractInfo = await executeQuery<{ extract_number: number; snapshot_date: string | Date }>(
-      db,
+      connection,
       `SELECT MAX(_extract_number) as extract_number, MAX(_snapshot_date)::VARCHAR as snapshot_date
        FROM enterprises
        WHERE _is_current = true`
@@ -65,25 +64,25 @@ export async function getDatabaseStats(): Promise<DatabaseStats> {
 
     // Get actual database size from Motherduck
     const sizeInfo = await executeQuery<{ database_size: string }>(
-      db,
+      connection,
       `SELECT database_size FROM pragma_database_size() WHERE database_name = '${dbName}'`
     )
     const databaseSize = sizeInfo[0]?.database_size || 'Unknown'
 
     // Get record counts for current data
     const counts = await Promise.all([
-      executeQuery<{ count: number }>(db, `SELECT COUNT(*) as count FROM enterprises WHERE _is_current = true`),
-      executeQuery<{ count: number }>(db, `SELECT COUNT(*) as count FROM establishments WHERE _is_current = true`),
-      executeQuery<{ count: number }>(db, `SELECT COUNT(*) as count FROM activities WHERE _is_current = true`),
-      executeQuery<{ count: number }>(db, `SELECT COUNT(*) as count FROM addresses WHERE _is_current = true`),
-      executeQuery<{ count: number }>(db, `SELECT COUNT(*) as count FROM denominations WHERE _is_current = true`),
-      executeQuery<{ count: number }>(db, `SELECT COUNT(*) as count FROM contacts WHERE _is_current = true`),
+      executeQuery<{ count: number }>(connection, `SELECT COUNT(*) as count FROM enterprises WHERE _is_current = true`),
+      executeQuery<{ count: number }>(connection, `SELECT COUNT(*) as count FROM establishments WHERE _is_current = true`),
+      executeQuery<{ count: number }>(connection, `SELECT COUNT(*) as count FROM activities WHERE _is_current = true`),
+      executeQuery<{ count: number }>(connection, `SELECT COUNT(*) as count FROM addresses WHERE _is_current = true`),
+      executeQuery<{ count: number }>(connection, `SELECT COUNT(*) as count FROM denominations WHERE _is_current = true`),
+      executeQuery<{ count: number }>(connection, `SELECT COUNT(*) as count FROM contacts WHERE _is_current = true`),
     ])
 
     // Get juridical form statistics (histogram)
     // Note: NULL juridical_form = Natural Person (type_of_enterprise = '1')
     const juridicalFormsAll = await executeQuery<JuridicalFormStat>(
-      db,
+      connection,
       `SELECT
         COALESCE(e.juridical_form, 'NATURAL_PERSON') as code,
         CASE
@@ -109,7 +108,7 @@ export async function getDatabaseStats(): Promise<DatabaseStats> {
 
     // Get language distribution (legal persons only - natural persons have no language data)
     const languageDistribution = await executeQuery<{ language: string; count: number }>(
-      db,
+      connection,
       `SELECT
         CASE
           WHEN primary_name_language = '2' THEN 'NL'
@@ -141,7 +140,7 @@ export async function getDatabaseStats(): Promise<DatabaseStats> {
     // Get province distribution from addresses
     const provinceSQLCase = generateProvinceSQLCase()
     const totalAddressesResult = await executeQuery<{ count: number }>(
-      db,
+      connection,
       `SELECT COUNT(*) as count
        FROM addresses
        WHERE _is_current = true
@@ -151,7 +150,7 @@ export async function getDatabaseStats(): Promise<DatabaseStats> {
     const totalForProvinces = Number(totalAddressesResult[0]?.count || 0)
 
     const provinceDistribution = await executeQuery<{ province: string; count: number }>(
-      db,
+      connection,
       `SELECT
         ${provinceSQLCase} as province,
         COUNT(*) as count
@@ -196,6 +195,6 @@ export async function getDatabaseStats(): Promise<DatabaseStats> {
 
     return stats
   } finally {
-    await closeMotherduck(db)
+    await closeMotherduck(connection)
   }
 }

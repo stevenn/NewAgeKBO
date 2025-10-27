@@ -32,11 +32,9 @@ export async function GET(request: Request) {
     }
 
     // Connect to Motherduck
-    const db = await connectMotherduck()
+    const connection = await connectMotherduck()
 
     try {
-      const dbName = process.env.MOTHERDUCK_DATABASE || 'kbo'
-      await executeQuery(db, `USE ${dbName}`)
 
       let searchSql = ''
       let countSql = ''
@@ -186,8 +184,8 @@ export async function GET(request: Request) {
           start_date: string | null
           address: string | null
           municipality: string | null
-        }>(db, searchSql),
-        executeQuery<{ count: number }>(db, countSql),
+        }>(connection, searchSql),
+        executeQuery<{ count: number }>(connection, countSql),
       ])
 
       const total = Number(countResult[0].count)
@@ -213,7 +211,7 @@ export async function GET(request: Request) {
         offset,
       })
     } finally {
-      await closeMotherduck(db)
+      await closeMotherduck(connection)
     }
   } catch (error) {
     console.error('Failed to search enterprises:', error)

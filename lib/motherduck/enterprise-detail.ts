@@ -1,4 +1,5 @@
 import { executeQuery } from './index'
+import type { DuckDBConnection } from '@duckdb/node-api'
 import type { EnterpriseDetail } from '@/app/api/enterprises/[number]/route'
 import {
   buildChildTableQuery,
@@ -13,12 +14,12 @@ import { getDenominationTypeDescription, getLanguageAbbreviation } from '@/lib/c
  * Fetches complete enterprise details with all related data
  * Reusable helper for both detail and snapshots endpoints
  *
- * @param db - Database connection
+ * @param connection - Database connection
  * @param enterpriseNumber - Enterprise number to fetch
  * @param filter - Temporal filter (current or point-in-time)
  */
 export async function fetchEnterpriseDetail(
-  db: import('duckdb').Database,
+  connection: DuckDBConnection,
   enterpriseNumber: string,
   filter: TemporalFilter
 ): Promise<EnterpriseDetail | null> {
@@ -106,7 +107,7 @@ export async function fetchEnterpriseDetail(
     start_date: string | null
     _snapshot_date: string
     _extract_number: number
-  }>(db, enterpriseQuery)
+  }>(connection, enterpriseQuery)
 
   if (enterprises.length === 0) {
     return null
@@ -122,7 +123,7 @@ export async function fetchEnterpriseDetail(
       denomination_type: string
       denomination: string
     }>(
-      db,
+      connection,
       buildChildTableQuery(
         'denominations',
         'language, denomination_type, denomination',
@@ -148,7 +149,7 @@ export async function fetchEnterpriseDetail(
       extra_address_info: string | null
       date_striking_off: string | null
     }>(
-      db,
+      connection,
       buildChildTableQuery(
         'addresses',
         `type_of_address,
@@ -180,7 +181,7 @@ export async function fetchEnterpriseDetail(
       nace_description_fr: string | null
       classification: string
     }>(
-      db,
+      connection,
       (() => {
         const temporalWhere = buildTemporalFilter(filter, 'a')
         const baseWhere = `a.entity_number = '${enterpriseNumber}' AND ${temporalWhere}`
@@ -235,7 +236,7 @@ export async function fetchEnterpriseDetail(
       contact_type: string
       contact_value: string
     }>(
-      db,
+      connection,
       buildChildTableQuery(
         'contacts',
         'entity_number, contact_type, contact_value',
@@ -252,7 +253,7 @@ export async function fetchEnterpriseDetail(
       start_date: string | null
       commercial_name: string | null
     }>(
-      db,
+      connection,
       (() => {
         const temporalWhere = buildTemporalFilter(filter)
         const baseWhere = `enterprise_number = '${enterpriseNumber}' AND ${temporalWhere}`
