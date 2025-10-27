@@ -1,10 +1,21 @@
 /**
  * Motherduck connection utilities
  * Wraps DuckDB Node.js client with Motherduck-specific configuration
+ *
+ * Note: Uses dynamic import for DuckDB to avoid loading native module during build
  */
 
-import * as duckdb from 'duckdb'
 import { MotherduckError } from '@/lib/errors'
+
+// Lazy-load DuckDB at runtime to avoid build-time native module loading
+let duckdb: typeof import('duckdb') | null = null
+
+async function getDuckDB() {
+  if (!duckdb) {
+    duckdb = await import('duckdb')
+  }
+  return duckdb
+}
 
 /**
  * Motherduck connection configuration
@@ -53,13 +64,14 @@ export function createConnectionString(
  */
 export async function connectMotherduck(
   config?: MotherduckConfig
-): Promise<duckdb.Database> {
+): Promise<import('duckdb').Database> {
+  const DuckDB = await getDuckDB()
   const mdConfig = config || getMotherduckConfig()
   // Connect without specifying database - we'll create/attach it later
   const connectionString = createConnectionString(mdConfig, false)
 
   return new Promise((resolve, reject) => {
-    const db = new duckdb.Database(connectionString, (err) => {
+    const db = new DuckDB.Database(connectionString, (err) => {
       if (err) {
         reject(
           new MotherduckError(
@@ -78,7 +90,7 @@ export async function connectMotherduck(
  * Execute a SQL query
  */
 export async function executeQuery<T = unknown>(
-  db: duckdb.Database,
+  db: import('duckdb').Database,
   sql: string
 ): Promise<T[]> {
   return new Promise((resolve, reject) => {
@@ -98,7 +110,7 @@ export async function executeQuery<T = unknown>(
  * Execute a SQL statement (no results expected)
  */
 export async function executeStatement(
-  db: duckdb.Database,
+  db: import('duckdb').Database,
   sql: string
 ): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -121,7 +133,7 @@ export async function executeStatement(
  * Execute multiple SQL statements in a transaction
  */
 export async function executeTransaction(
-  db: duckdb.Database,
+  db: import('duckdb').Database,
   statements: string[]
 ): Promise<void> {
   await executeStatement(db, 'BEGIN TRANSACTION')
@@ -140,7 +152,7 @@ export async function executeTransaction(
 /**
  * Close database connection
  */
-export async function closeMotherduck(db: duckdb.Database): Promise<void> {
+export async function closeMotherduck(db: import('duckdb').Database): Promise<void> {
   return new Promise((resolve, reject) => {
     db.close((err) => {
       if (err) {
@@ -158,7 +170,7 @@ export async function closeMotherduck(db: duckdb.Database): Promise<void> {
  * Check if database exists
  */
 export async function databaseExists(
-  db: duckdb.Database,
+  db: import('duckdb').Database,
   dbName: string
 ): Promise<boolean> {
   const result = await executeQuery<{ database_name: string }>(
@@ -172,7 +184,7 @@ export async function databaseExists(
  * Create database if it doesn't exist
  */
 export async function ensureDatabase(
-  db: duckdb.Database,
+  db: import('duckdb').Database,
   dbName: string
 ): Promise<void> {
   const exists = await databaseExists(db, dbName)
@@ -187,7 +199,7 @@ export async function ensureDatabase(
  * Check if table exists
  */
 export async function tableExists(
-  db: duckdb.Database,
+  db: import('duckdb').Database,
   tableName: string
 ): Promise<boolean> {
   const result = await executeQuery<{ table_name: string }>(
@@ -201,7 +213,7 @@ export async function tableExists(
  * Get table row count
  */
 export async function getTableCount(
-  db: duckdb.Database,
+  db: import('duckdb').Database,
   tableName: string
 ): Promise<number> {
   const result = await executeQuery<{ count: number }>(
@@ -215,7 +227,7 @@ export async function getTableCount(
  * Get database statistics
  */
 export async function getDatabaseStats(
-  db: duckdb.Database
+  db: import('duckdb').Database
 ): Promise<{ table_name: string; row_count: number }[]> {
   try {
     const tables = await executeQuery<{ table_name: string }>(

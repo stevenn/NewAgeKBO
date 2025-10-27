@@ -1,4 +1,3 @@
-import type * as duckdb from 'duckdb'
 import { executeQuery } from './index'
 import type { EnterpriseDetail } from '@/app/api/enterprises/[number]/route'
 import {
@@ -19,7 +18,7 @@ import { getDenominationTypeDescription, getLanguageAbbreviation } from '@/lib/c
  * @param filter - Temporal filter (current or point-in-time)
  */
 export async function fetchEnterpriseDetail(
-  db: duckdb.Database,
+  db: import('duckdb').Database,
   enterpriseNumber: string,
   filter: TemporalFilter
 ): Promise<EnterpriseDetail | null> {
