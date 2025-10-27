@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS addresses (
 
   -- Temporal tracking
   _is_current BOOLEAN NOT NULL,               -- TRUE for current, FALSE for historical
+  _deleted_at_extract INTEGER,                -- Update Set number when this record was deleted (NULL if current)
 
   -- Composite primary key to support temporal tracking
   PRIMARY KEY (id, _snapshot_date, _extract_number),
@@ -39,6 +40,12 @@ CREATE TABLE IF NOT EXISTS addresses (
 );
 
 -- Comments for documentation
-COMMENT ON TABLE addresses IS 'Addresses (~2.8M) for enterprises and establishments';
+COMMENT ON TABLE addresses IS 'Addresses (~2.8M) for enterprises and establishments. Supports temporal versioning for historical queries.';
+COMMENT ON COLUMN addresses.id IS 'Composite key: entity_number_type_hash(address). Ensures uniqueness across versions.';
+COMMENT ON COLUMN addresses._snapshot_date IS 'Date of KBO data snapshot (part of composite PK for temporal tracking)';
+COMMENT ON COLUMN addresses._extract_number IS 'Monotonic extract number for version ordering (part of composite PK)';
+COMMENT ON COLUMN addresses.entity_number IS 'Enterprise or establishment number (FK to either table)';
 COMMENT ON COLUMN addresses.type_of_address IS 'REGO=Registered office, BAET=Establishment, ABBR=Branch, OBAD=Oldest active';
+COMMENT ON COLUMN addresses._is_current IS 'TRUE for current version (highest extract number), FALSE for historical versions';
+COMMENT ON COLUMN addresses._deleted_at_extract IS 'Extract number when this record was superseded. NULL if current or never superseded. NOTE: Not populated by import scripts (added 2025-10-26), documented limitation.';
 COMMENT ON COLUMN addresses.date_striking_off IS 'Date struck off (rare)';

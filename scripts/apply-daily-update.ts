@@ -17,7 +17,7 @@ config({ path: ['.env.local', '.env'] })
 import StreamZip from 'node-stream-zip'
 import { parse } from 'csv-parse/sync'
 import * as path from 'path'
-import { createHash } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import { connectMotherduck, closeMotherduck, executeQuery, executeStatement } from '../lib/motherduck'
 import {
   csvColumnToDbColumn,
@@ -107,9 +107,12 @@ async function applyDeletes(
     const entityNumbers = records.map(r => `'${r[csvPkColumn]}'`).join(',')
 
     // Mark records as historical (don't actually delete)
+    // Track which extract deleted the record for accurate temporal queries
+    const extractNumber = parseInt(metadata.ExtractNumber)
     const sql = `
       UPDATE ${dbTableName}
-      SET _is_current = false
+      SET _is_current = false,
+          _deleted_at_extract = ${extractNumber}
       WHERE ${dbPkColumn} IN (${entityNumbers})
         AND _is_current = true
     `
@@ -393,6 +396,7 @@ async function processDailyUpdate(zipPath: string): Promise<UpdateStats> {
 
   const zip = new StreamZip.async({ file: zipPath })
   const db = await connectMotherduck()
+  let jobId: string | undefined
 
   try {
     // Connect to database from environment
@@ -413,6 +417,29 @@ async function processDailyUpdate(zipPath: string): Promise<UpdateStats> {
     if (stats.metadata.ExtractType !== 'update') {
       throw new Error(`Expected 'update' extract type, got '${stats.metadata.ExtractType}'`)
     }
+
+    // Step 2: Create import job record
+    console.log('\n📝 Creating import job record...')
+    jobId = randomUUID()
+    const jobStartTime = new Date().toISOString()
+
+    await executeQuery(
+      db,
+      `INSERT INTO import_jobs (
+        id, extract_number, extract_type, snapshot_date, extract_timestamp,
+        status, started_at, worker_type
+      ) VALUES (
+        '${jobId}',
+        ${stats.metadata.ExtractNumber},
+        'update',
+        '${stats.metadata.SnapshotDate}',
+        '${stats.metadata.ExtractTimestamp}',
+        'running',
+        '${jobStartTime}',
+        'local'
+      )`
+    )
+    console.log(`   ✓ Job ID: ${jobId}`)
 
     // Step 2: Get list of tables from delete/insert files
     const entries = await zip.entries()
@@ -470,6 +497,45 @@ async function processDailyUpdate(zipPath: string): Promise<UpdateStats> {
       }
     }
 
+    // Step 5: Update import job to completed
+    if (jobId) {
+      const totalRecordsProcessed = stats.deletesApplied + stats.insertsApplied
+      const jobStatus = stats.errors.length > 0 ? 'failed' : 'completed'
+      const errorMessage = stats.errors.length > 0 ? stats.errors.join('; ') : null
+
+      await executeQuery(
+        db,
+        `UPDATE import_jobs SET
+          status = '${jobStatus}',
+          completed_at = '${new Date().toISOString()}',
+          records_processed = ${totalRecordsProcessed},
+          records_inserted = ${stats.insertsApplied},
+          records_updated = 0,
+          records_deleted = ${stats.deletesApplied}
+          ${errorMessage ? `, error_message = '${errorMessage.replace(/'/g, "''")}'` : ''}
+        WHERE id = '${jobId}'`
+      )
+      console.log(`\n   ✓ Job ${jobStatus}: ${jobId}`)
+    }
+
+  } catch (error: any) {
+    // Try to update job status to failed
+    if (jobId) {
+      try {
+        const errorMessage = error.message || 'Unknown error'
+        await executeQuery(
+          db,
+          `UPDATE import_jobs SET
+            status = 'failed',
+            completed_at = '${new Date().toISOString()}',
+            error_message = '${errorMessage.replace(/'/g, "''")}'
+          WHERE id = '${jobId}'`
+        )
+      } catch (updateError) {
+        console.error('Failed to update job status:', updateError)
+      }
+    }
+    throw error
   } finally {
     await zip.close()
     await closeMotherduck(db)
