@@ -37,7 +37,7 @@ async function checkExtracts() {
     )
 
     allExtracts.forEach(e => {
-      console.log(`   Extract ${e.extract_number} (${e.snapshot_date}) - ${e.record_count} records - has_current=${e.has_current === 1}`)
+      console.log(`   Extract ${e.extract_number} (${e.snapshot_date}) - ${e.record_count} records - has_current=${Boolean(e.has_current)}`)
     })
 
     // Check metadata table if it exists

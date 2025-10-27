@@ -90,7 +90,7 @@ async function testTemporalQuery() {
       console.log('   The temporal query fix is not working correctly.')
     } else if (extract150Detail?.denominations.length === extract140Detail?.denominations.length) {
       console.log('✅ PASS: Extract 150 correctly returns denominations from Extract 140')
-      console.log(`   Found ${extract150Detail.denominations.length} denomination(s)`)
+      console.log(`   Found ${extract150Detail?.denominations.length} denomination(s)`)
     } else {
       console.log('⚠️  PARTIAL: Extract 150 has denominations but count differs from Extract 140')
       console.log(`   Extract 150: ${extract150Detail?.denominations.length || 0}`)
