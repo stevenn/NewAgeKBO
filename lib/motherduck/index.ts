@@ -64,13 +64,16 @@ export async function connectMotherduck(
   try {
     console.log(`Connecting to Motherduck with database: ${mdConfig.database}`)
 
-    // For serverless: Create in-memory database first, set home_directory, then attach Motherduck
-    // This avoids the home directory error during initial connection
+    // For serverless: Create in-memory database first, set all directories, then attach Motherduck
+    // This avoids the home directory error during Motherduck extension initialization
     const instance = await DuckDBInstance.create(':memory:')
     const connection = await instance.connect()
 
-    // Set home directory BEFORE attaching to Motherduck
+    // CRITICAL: Set all directory configurations BEFORE attaching to Motherduck
+    // The Motherduck extension checks home_directory during initialization
     await connection.run("SET home_directory='/tmp'")
+    await connection.run("SET extension_directory='/tmp/.duckdb/extensions'")
+    await connection.run("SET temp_directory='/tmp'")
 
     // Set Motherduck token as environment variable (DuckDB will use it)
     process.env.motherduck_token = mdConfig.token
