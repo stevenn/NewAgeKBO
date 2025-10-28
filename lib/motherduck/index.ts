@@ -68,14 +68,21 @@ export async function connectMotherduck(
     const connectionString = createConnectionString(mdConfig, true)
 
     // Create DuckDB instance with Motherduck connection
-    // CRITICAL: Set home_directory in config for serverless environments
     const instance = await DuckDBInstance.create(connectionString, {
       motherduck_token: mdConfig.token,
-      home_directory: '/tmp',
     })
 
     // Create connection
     const connection = await instance.connect()
+
+    // CRITICAL: Set home_directory for serverless environments IMMEDIATELY after connect
+    // This must be the very first operation before any Motherduck operations
+    try {
+      await connection.run("SET home_directory='/tmp'")
+    } catch (setError) {
+      console.warn('Warning: Failed to set home_directory:', setError)
+      // Continue anyway - it might work without it or already be set
+    }
 
     console.log(`Successfully connected to Motherduck database: ${mdConfig.database}`)
 
