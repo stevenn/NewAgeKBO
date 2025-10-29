@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { checkAdminAccess } from '@/lib/auth/check-admin'
 import { connectMotherduck, closeMotherduck, executeQuery } from '@/lib/motherduck'
 
@@ -18,16 +18,38 @@ export interface ImportJobRecord {
   workerType: string
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     // Check authentication and admin role
     const authError = await checkAdminAccess()
     if (authError) return authError
 
+    // Get pagination parameters
+    const searchParams = request.nextUrl.searchParams
+    const page = parseInt(searchParams.get('page') || '1', 10)
+    const limit = parseInt(searchParams.get('limit') || '25', 10)
+    const offset = (page - 1) * limit
+
+    // Validate pagination parameters
+    if (page < 1 || limit < 1 || limit > 200) {
+      return NextResponse.json(
+        { error: 'Invalid pagination parameters' },
+        { status: 400 }
+      )
+    }
+
     // Connect to Motherduck
     const connection = await connectMotherduck()
 
     try {
+      // Get total count
+      const countResults = await executeQuery<{ total: number }>(
+        connection,
+        `SELECT COUNT(*) as total FROM import_jobs`
+      )
+      const total = Number(countResults[0]?.total || 0)
+      const totalPages = Math.ceil(total / limit)
+
       // Fetch import jobs ordered by most recent first
       const results = await executeQuery<{
         id: string
@@ -61,7 +83,7 @@ export async function GET() {
           worker_type
         FROM import_jobs
         ORDER BY extract_number DESC
-        LIMIT 100`
+        OFFSET ${offset} LIMIT ${limit}`
       )
 
       const jobs: ImportJobRecord[] = results.map((row) => ({
@@ -80,7 +102,12 @@ export async function GET() {
         workerType: row.worker_type,
       }))
 
-      return NextResponse.json({ jobs })
+      return NextResponse.json({
+        jobs,
+        total,
+        page,
+        totalPages,
+      })
     } finally {
       await closeMotherduck(connection)
     }
