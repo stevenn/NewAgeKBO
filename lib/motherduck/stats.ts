@@ -63,11 +63,33 @@ export async function getDatabaseStats(): Promise<DatabaseStats> {
       : 'Unknown'
 
     // Get actual database size from Motherduck
-    const sizeInfo = await executeQuery<{ database_size: string }>(
+    // Use md_information_schema.storage_info which is Motherduck-specific
+    const sizeInfo = await executeQuery<{ active_bytes: string; historical_bytes: string }>(
       connection,
-      `SELECT database_size FROM pragma_database_size() WHERE database_name = '${dbName}'`
+      `SELECT CAST(active_bytes AS VARCHAR) as active_bytes,
+              CAST(historical_bytes AS VARCHAR) as historical_bytes
+       FROM md_information_schema.storage_info
+       WHERE database_name = '${dbName}'`
     )
-    const databaseSize = sizeInfo[0]?.database_size || 'Unknown'
+
+    // Format bytes to human readable size
+    const formatBytes = (bytes: string): string => {
+      const num = parseInt(bytes)
+      if (isNaN(num)) return 'Unknown'
+      const units = ['B', 'KB', 'MB', 'GB', 'TB']
+      let value = num
+      let unitIndex = 0
+      while (value >= 1024 && unitIndex < units.length - 1) {
+        value /= 1024
+        unitIndex++
+      }
+      return `${value.toFixed(2)} ${units[unitIndex]}`
+    }
+
+    const activeBytes = sizeInfo[0]?.active_bytes || '0'
+    const historicalBytes = sizeInfo[0]?.historical_bytes || '0'
+    const totalBytes = (parseInt(activeBytes) + parseInt(historicalBytes)).toString()
+    const databaseSize = formatBytes(totalBytes)
 
     // Get record counts for current data
     const counts = await Promise.all([
