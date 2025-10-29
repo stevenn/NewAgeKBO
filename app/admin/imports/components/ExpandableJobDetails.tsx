@@ -61,8 +61,9 @@ export function ExpandableJobDetails({ jobId, extractNumber, isExpanded }: Expan
     if (isExpanded && !hasLoaded) {
       fetchAffectedEnterprises(1)
     }
+    // fetchAffectedEnterprises is stable and doesn't need to be in deps
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isExpanded, hasLoaded])
+  }, [isExpanded, hasLoaded, jobId])
 
   const handlePageChange = async (newPage: number) => {
     await fetchAffectedEnterprises(newPage)

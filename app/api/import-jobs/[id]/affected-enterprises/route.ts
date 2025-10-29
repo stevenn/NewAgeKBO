@@ -15,6 +15,15 @@ export async function GET(
     // Await params (Next.js 15 requirement)
     const { id } = await params
 
+    // Validate UUID format to prevent SQL injection
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!uuidRegex.test(id)) {
+      return NextResponse.json(
+        { error: 'Invalid job ID format' },
+        { status: 400 }
+      )
+    }
+
     // Get query parameters
     const searchParams = request.nextUrl.searchParams
     const page = parseInt(searchParams.get('page') || '1', 10)
@@ -32,6 +41,7 @@ export async function GET(
 
     try {
       // First, get the import job to extract the extract_number
+      // Safe to use in SQL after UUID validation above
       const jobResults = await executeQuery<{ extract_number: number }>(
         connection,
         `SELECT extract_number FROM import_jobs WHERE id = '${id}'`
