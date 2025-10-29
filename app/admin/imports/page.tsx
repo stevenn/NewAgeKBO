@@ -15,6 +15,15 @@ interface ImportJob {
   errorMessage: string | null
 }
 
+interface AvailableFile {
+  filename: string
+  url: string
+  extract_number: number
+  snapshot_date: string
+  file_type: 'full' | 'update'
+  imported: boolean
+}
+
 export default function ImportsPage() {
   const [jobs, setJobs] = useState<ImportJob[]>([])
   const [loading, setLoading] = useState(true)
@@ -33,6 +42,12 @@ export default function ImportsPage() {
   const [triggerError, setTriggerError] = useState<string | null>(null)
   const [triggerSuccess, setTriggerSuccess] = useState(false)
   const [importUrl, setImportUrl] = useState('')
+
+  // Available files state
+  const [availableFiles, setAvailableFiles] = useState<AvailableFile[]>([])
+  const [filesLoading, setFilesLoading] = useState(false)
+  const [filesError, setFilesError] = useState<string | null>(null)
+  const [importingFiles, setImportingFiles] = useState<Set<number>>(new Set())
 
   const toggleJobExpansion = (jobId: string) => {
     setExpandedJobIds(prev => {
@@ -71,8 +86,28 @@ export default function ImportsPage() {
       })
   }
 
+  // Fetch available files from KBO portal
+  const fetchAvailableFiles = async () => {
+    setFilesLoading(true)
+    setFilesError(null)
+
+    try {
+      const response = await fetch('/api/datasets/daily-updates')
+      if (!response.ok) {
+        throw new Error('Failed to fetch available files')
+      }
+      const data = await response.json()
+      setAvailableFiles(data.files || [])
+    } catch (err) {
+      setFilesError(err instanceof Error ? err.message : 'Failed to fetch files')
+    } finally {
+      setFilesLoading(false)
+    }
+  }
+
   useEffect(() => {
     fetchJobs(1)
+    fetchAvailableFiles()
   }, [])
 
   const handlePageChange = (newPage: number) => {
@@ -109,14 +144,53 @@ export default function ImportsPage() {
       setTriggerSuccess(true)
       setImportUrl('') // Clear the input
 
-      // Refresh the job list after a short delay
+      // Refresh the job list and available files after a short delay
       setTimeout(() => {
         fetchJobs(currentPage)
+        fetchAvailableFiles()
       }, 1000)
     } catch (err) {
       setTriggerError(err instanceof Error ? err.message : 'Failed to trigger import')
     } finally {
       setTriggerLoading(false)
+    }
+  }
+
+  const handleImportFile = async (file: AvailableFile) => {
+    // Add to importing set
+    setImportingFiles(prev => new Set(prev).add(file.extract_number))
+
+    try {
+      const response = await fetch('/api/import/daily-update', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          url: file.url,
+        }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || data.details || 'Failed to trigger import')
+      }
+
+      // Refresh both lists
+      setTimeout(() => {
+        fetchJobs(currentPage)
+        fetchAvailableFiles()
+      }, 1000)
+    } catch (err) {
+      alert(`Failed to import ${file.filename}: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    } finally {
+      // Remove from importing set
+      setImportingFiles(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(file.extract_number)
+        return newSet
+      })
     }
   }
 
@@ -232,6 +306,112 @@ export default function ImportsPage() {
             )}
           </button>
         </div>
+      </div>
+
+      {/* Available Files List */}
+      <div className="bg-white rounded-lg border p-6 mb-6">
+        <div className="flex justify-between items-center mb-4">
+          <div>
+            <h2 className="text-xl font-semibold">Available Daily Updates</h2>
+            <p className="text-gray-600 text-sm mt-1">
+              Files available from the KBO Open Data portal
+            </p>
+          </div>
+          <button
+            onClick={fetchAvailableFiles}
+            disabled={filesLoading}
+            className="text-blue-600 hover:text-blue-800 text-sm font-medium flex items-center gap-1"
+          >
+            <svg className={`w-4 h-4 ${filesLoading ? 'animate-spin' : ''}`} fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+              <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Refresh
+          </button>
+        </div>
+
+        {filesError && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+            <p className="text-red-800 font-medium">Error loading files</p>
+            <p className="text-red-700 text-sm mt-1">{filesError}</p>
+          </div>
+        )}
+
+        {filesLoading && (
+          <div className="text-center py-8">
+            <svg className="animate-spin h-8 w-8 mx-auto text-blue-600" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+            <p className="text-gray-600 mt-2">Loading available files...</p>
+          </div>
+        )}
+
+        {!filesLoading && !filesError && availableFiles.length === 0 && (
+          <div className="text-center py-8 text-gray-500">
+            No files available
+          </div>
+        )}
+
+        {!filesLoading && !filesError && availableFiles.length > 0 && (
+          <div className="space-y-2">
+            {availableFiles.map(file => (
+              <div
+                key={file.extract_number}
+                className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50"
+              >
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-mono text-sm font-medium">
+                      #{file.extract_number}
+                    </span>
+                    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
+                      file.file_type === 'full'
+                        ? 'bg-orange-100 text-orange-800'
+                        : 'bg-blue-100 text-blue-800'
+                    }`}>
+                      {file.file_type === 'full' ? 'Full' : 'Update'}
+                    </span>
+                    {file.imported && (
+                      <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                        ✓ Imported
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-gray-600">
+                    {file.snapshot_date}
+                  </p>
+                  <p className="text-xs text-gray-500 font-mono mt-1">
+                    {file.filename}
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleImportFile(file)}
+                  disabled={file.imported || importingFiles.has(file.extract_number)}
+                  className="ml-4 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm flex items-center gap-2"
+                >
+                  {importingFiles.has(file.extract_number) ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Importing...
+                    </>
+                  ) : file.imported ? (
+                    'Imported'
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+                        <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
+                      Import
+                    </>
+                  )}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Import Jobs History */}
