@@ -38,16 +38,12 @@ export default function ImportsPage() {
   // Expanded jobs state
   const [expandedJobIds, setExpandedJobIds] = useState<Set<string>>(new Set())
 
-  const [triggerLoading, setTriggerLoading] = useState(false)
-  const [triggerError, setTriggerError] = useState<string | null>(null)
-  const [triggerSuccess, setTriggerSuccess] = useState(false)
-  const [importUrl, setImportUrl] = useState('')
-
   // Available files state
   const [availableFiles, setAvailableFiles] = useState<AvailableFile[]>([])
   const [filesLoading, setFilesLoading] = useState(false)
   const [filesError, setFilesError] = useState<string | null>(null)
   const [importingFiles, setImportingFiles] = useState<Set<number>>(new Set())
+  const [showImportedFiles, setShowImportedFiles] = useState(false)
 
   const toggleJobExpansion = (jobId: string) => {
     setExpandedJobIds(prev => {
@@ -112,48 +108,6 @@ export default function ImportsPage() {
 
   const handlePageChange = (newPage: number) => {
     fetchJobs(newPage)
-  }
-
-  const handleTriggerDailyUpdate = async () => {
-    if (!importUrl.trim()) {
-      setTriggerError('Please enter a URL or filename')
-      return
-    }
-
-    setTriggerLoading(true)
-    setTriggerError(null)
-    setTriggerSuccess(false)
-
-    try {
-      const response = await fetch('/api/import/daily-update', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          url: importUrl.trim(),
-        }),
-      })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || data.details || 'Failed to trigger import')
-      }
-
-      setTriggerSuccess(true)
-      setImportUrl('') // Clear the input
-
-      // Refresh the job list and available files after a short delay
-      setTimeout(() => {
-        fetchJobs(currentPage)
-        fetchAvailableFiles()
-      }, 1000)
-    } catch (err) {
-      setTriggerError(err instanceof Error ? err.message : 'Failed to trigger import')
-    } finally {
-      setTriggerLoading(false)
-    }
   }
 
   const handleImportFile = async (file: AvailableFile) => {
@@ -236,78 +190,6 @@ export default function ImportsPage() {
         <h1 className="text-3xl font-bold">Import Management</h1>
       </div>
 
-      {/* Manual Trigger Section */}
-      <div className="bg-white rounded-lg border p-6 mb-6">
-        <h2 className="text-xl font-semibold mb-4">Import Daily Update</h2>
-        <p className="text-gray-600 mb-4">
-          Import a daily update file from the KBO Open Data service. Enter the full URL or just the filename.
-        </p>
-
-        {triggerError && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
-            <p className="text-red-800 font-medium">Error</p>
-            <p className="text-red-700 text-sm mt-1">{triggerError}</p>
-          </div>
-        )}
-
-        {triggerSuccess && (
-          <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
-            <p className="text-green-800 font-medium">Success!</p>
-            <p className="text-green-700 text-sm mt-1">
-              Daily update import completed successfully. The job has been added to the history below.
-            </p>
-          </div>
-        )}
-
-        <div className="space-y-4">
-          <div>
-            <label htmlFor="importUrl" className="block text-sm font-medium text-gray-700 mb-2">
-              File URL or Filename
-            </label>
-            <input
-              id="importUrl"
-              type="text"
-              value={importUrl}
-              onChange={(e) => setImportUrl(e.target.value)}
-              placeholder="https://kbopub.economie.fgov.be/.../KboOpenData_0141_2025_10_06_Update.zip"
-              disabled={triggerLoading}
-              className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed font-mono text-sm"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !triggerLoading) {
-                  handleTriggerDailyUpdate()
-                }
-              }}
-            />
-            <p className="text-xs text-gray-500 mt-1">
-              Examples: <span className="font-mono">KboOpenData_0141_2025_10_06_Update.zip</span> or full URL
-            </p>
-          </div>
-
-          <button
-            onClick={handleTriggerDailyUpdate}
-            disabled={triggerLoading || !importUrl.trim()}
-            className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
-          >
-            {triggerLoading ? (
-              <>
-                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                <span>Importing...</span>
-              </>
-            ) : (
-              <>
-                <svg className="w-4 h-4" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
-                  <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-                <span>Import Daily Update</span>
-              </>
-            )}
-          </button>
-        </div>
-      </div>
-
       {/* Available Files List */}
       <div className="bg-white rounded-lg border p-6 mb-6">
         <div className="flex justify-between items-center mb-4">
@@ -352,66 +234,125 @@ export default function ImportsPage() {
           </div>
         )}
 
-        {!filesLoading && !filesError && availableFiles.length > 0 && (
-          <div className="space-y-2">
-            {availableFiles.map(file => (
-              <div
-                key={file.extract_number}
-                className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50"
-              >
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="font-mono text-sm font-medium">
-                      #{file.extract_number}
+        {!filesLoading && !filesError && availableFiles.length > 0 && (() => {
+          const notImportedFiles = availableFiles.filter(f => !f.imported)
+          const importedFiles = availableFiles.filter(f => f.imported)
+
+          const FileRow = ({ file }: { file: AvailableFile }) => (
+            <div
+              key={file.extract_number}
+              className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50"
+            >
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="font-mono text-sm font-medium">
+                    #{file.extract_number}
+                  </span>
+                  <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
+                    file.file_type === 'full'
+                      ? 'bg-orange-100 text-orange-800'
+                      : 'bg-blue-100 text-blue-800'
+                  }`}>
+                    {file.file_type === 'full' ? 'Full' : 'Update'}
+                  </span>
+                  {file.imported && (
+                    <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                      ✓ Imported
                     </span>
-                    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
-                      file.file_type === 'full'
-                        ? 'bg-orange-100 text-orange-800'
-                        : 'bg-blue-100 text-blue-800'
-                    }`}>
-                      {file.file_type === 'full' ? 'Full' : 'Update'}
-                    </span>
-                    {file.imported && (
-                      <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
-                        ✓ Imported
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-sm text-gray-600">
-                    {file.snapshot_date}
-                  </p>
-                  <p className="text-xs text-gray-500 font-mono mt-1">
-                    {file.filename}
-                  </p>
-                </div>
-                <button
-                  onClick={() => handleImportFile(file)}
-                  disabled={file.imported || importingFiles.has(file.extract_number)}
-                  className="ml-4 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm flex items-center gap-2"
-                >
-                  {importingFiles.has(file.extract_number) ? (
-                    <>
-                      <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                      </svg>
-                      Importing...
-                    </>
-                  ) : file.imported ? (
-                    'Imported'
-                  ) : (
-                    <>
-                      <svg className="w-4 h-4" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
-                        <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                      </svg>
-                      Import
-                    </>
                   )}
-                </button>
+                </div>
+                <p className="text-sm text-gray-600">
+                  {file.snapshot_date}
+                </p>
+                <p className="text-xs text-gray-500 font-mono mt-1">
+                  {file.filename}
+                </p>
               </div>
-            ))}
-          </div>
-        )}
+              <button
+                onClick={() => handleImportFile(file)}
+                disabled={file.imported || importingFiles.has(file.extract_number)}
+                className="ml-4 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm flex items-center gap-2"
+              >
+                {importingFiles.has(file.extract_number) ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Importing...
+                  </>
+                ) : file.imported ? (
+                  'Imported'
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+                      <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    Import
+                  </>
+                )}
+              </button>
+            </div>
+          )
+
+          return (
+            <div className="space-y-4">
+              {/* Not Imported Files - Always Visible */}
+              {notImportedFiles.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                    <span className="flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-800 text-xs">
+                      {notImportedFiles.length}
+                    </span>
+                    Pending Import
+                  </h3>
+                  <div className="space-y-2">
+                    {notImportedFiles.map(file => <FileRow key={file.extract_number} file={file} />)}
+                  </div>
+                </div>
+              )}
+
+              {notImportedFiles.length === 0 && (
+                <div className="text-center py-6 text-gray-500">
+                  <p className="text-sm">All available files have been imported</p>
+                </div>
+              )}
+
+              {/* Imported Files - Collapsible */}
+              {importedFiles.length > 0 && (
+                <div className="mt-6 pt-6 border-t">
+                  <button
+                    onClick={() => setShowImportedFiles(!showImportedFiles)}
+                    className="w-full flex items-center justify-between text-sm font-semibold text-gray-700 hover:text-gray-900 mb-3"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="flex items-center justify-center w-6 h-6 rounded-full bg-green-100 text-green-800 text-xs">
+                        {importedFiles.length}
+                      </span>
+                      Already Imported
+                    </span>
+                    <svg
+                      className={`w-5 h-5 transition-transform ${showImportedFiles ? 'rotate-180' : ''}`}
+                      fill="none"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                  {showImportedFiles && (
+                    <div className="space-y-2">
+                      {importedFiles.map(file => <FileRow key={file.extract_number} file={file} />)}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )
+        })()}
       </div>
 
       {/* Import Jobs History */}
