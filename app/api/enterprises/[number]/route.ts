@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { checkAdminAccess } from '@/lib/auth/check-admin'
-import { connectMotherduck, closeMotherduck, executeQuery } from '@/lib/motherduck'
+import { connectMotherduck, closeMotherduck } from '@/lib/motherduck'
 
 export interface EnterpriseDetail {
   enterpriseNumber: string

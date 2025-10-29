@@ -40,8 +40,8 @@ async function verifySchema() {
     const db = await connectMotherduck()
     console.log(`✅ Connected to database: ${mdConfig.database}\n`)
 
-    // Use database
-    await executeQuery(db, `USE ${mdConfig.database}`)
+    // Connection already switched to the Motherduck database via connectMotherduck()
+    // No need to USE again - the connection is ready to use
 
     // Get all tables
     const tables = await executeQuery<{ table_name: string }>(

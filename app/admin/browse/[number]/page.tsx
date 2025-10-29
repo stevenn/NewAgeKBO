@@ -2,14 +2,16 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
-import { useParams } from 'next/navigation'
+import { useParams, useSearchParams } from 'next/navigation'
 import type { EnterpriseDetail } from '@/app/api/enterprises/[number]/route'
 import type { Snapshot } from '@/app/api/enterprises/[number]/snapshots/route'
 import { compareEnterprises } from '@/lib/utils/compare-snapshots'
 
 export default function EnterpriseDetailPage() {
   const params = useParams()
+  const searchParams = useSearchParams()
   const number = params.number as string
+  const fromExtract = searchParams.get('from_extract')
 
   const [detail, setDetail] = useState<EnterpriseDetail | null>(null)
   const [previousDetail, setPreviousDetail] = useState<EnterpriseDetail | null>(null)
@@ -37,7 +39,17 @@ export default function EnterpriseDetailPage() {
         const data = await res.json()
         setSnapshots(data.snapshots)
 
-        // Select current snapshot by default (will trigger detail fetch in other useEffect)
+        // If from_extract parameter is provided, auto-select that snapshot
+        if (fromExtract) {
+          const extractNum = parseInt(fromExtract, 10)
+          const targetSnapshot = data.snapshots.find((s: Snapshot) => s.extractNumber === extractNum)
+          if (targetSnapshot) {
+            setSelectedSnapshot(targetSnapshot)
+            return
+          }
+        }
+
+        // Otherwise, select current snapshot by default (will trigger detail fetch in other useEffect)
         const current = data.snapshots.find((s: Snapshot) => s.isCurrent)
         if (current) {
           setSelectedSnapshot(current)
@@ -49,7 +61,7 @@ export default function EnterpriseDetailPage() {
     }
 
     fetchSnapshotsAndDetail()
-  }, [number])
+  }, [number, fromExtract])
 
   // Fetch enterprise details when selected snapshot changes
   useEffect(() => {
@@ -73,6 +85,7 @@ export default function EnterpriseDetailPage() {
         setDetail(data)
 
         // Find previous snapshot for comparison
+        // We need to find the last snapshot that actually has data for this enterprise
         const currentIndex = snapshots.findIndex(
           (s) =>
             s.snapshotDate === selectedSnapshot.snapshotDate &&
@@ -80,16 +93,24 @@ export default function EnterpriseDetailPage() {
         )
 
         if (currentIndex !== -1 && currentIndex < snapshots.length - 1) {
-          const previousSnapshot = snapshots[currentIndex + 1]
-          const prevParams = new URLSearchParams({
-            snapshot_date: previousSnapshot.snapshotDate,
-            extract_number: previousSnapshot.extractNumber.toString(),
-          })
+          // Try snapshots starting from the next one until we find one with data
+          for (let i = currentIndex + 1; i < snapshots.length; i++) {
+            const previousSnapshot = snapshots[i]
+            const prevParams = new URLSearchParams({
+              snapshot_date: previousSnapshot.snapshotDate,
+              extract_number: previousSnapshot.extractNumber.toString(),
+            })
 
-          const prevRes = await fetch(`/api/enterprises/${number}?${prevParams}`)
-          if (prevRes.ok) {
-            const prevData = await prevRes.json()
-            setPreviousDetail(prevData)
+            const prevRes = await fetch(`/api/enterprises/${number}?${prevParams}`)
+            if (prevRes.ok) {
+              const prevData = await prevRes.json()
+              // Check if this snapshot actually has the enterprise data
+              // (the API returns data even if enterprise doesn't exist in that extract)
+              if (prevData && prevData.enterpriseNumber) {
+                setPreviousDetail(prevData)
+                break
+              }
+            }
           }
         }
       } catch (err) {
@@ -134,6 +155,23 @@ export default function EnterpriseDetailPage() {
           ← Back to Browse
         </Link>
       </div>
+
+      {/* From Extract Indicator */}
+      {fromExtract && selectedSnapshot && (
+        <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5 text-green-600" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+              <path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span className="text-sm font-medium text-green-900">
+              Viewing changes from Import Job Extract #{fromExtract}
+            </span>
+            <span className="text-sm text-green-700">
+              ({selectedSnapshot.snapshotDate})
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Temporal Navigation */}
       {snapshots.length > 0 && (
@@ -308,7 +346,7 @@ export default function EnterpriseDetailPage() {
         </div>
 
         {/* Denominations */}
-        {displayDetail && displayDetail.denominations.length > 0 && (
+        {displayDetail && (displayDetail.denominations.length > 0 || (comparison && comparison.denominations.removed.length > 0)) && (
           <div className="bg-white rounded-lg border p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold">Names & Denominations</h2>
@@ -415,7 +453,7 @@ export default function EnterpriseDetailPage() {
         )}
 
         {/* Addresses */}
-        {displayDetail && displayDetail.addresses.length > 0 && (
+        {displayDetail && (displayDetail.addresses.length > 0 || (comparison && comparison.addresses.removed.length > 0)) && (
           <div className="bg-white rounded-lg border p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold">Addresses</h2>
@@ -546,7 +584,7 @@ export default function EnterpriseDetailPage() {
         )}
 
         {/* Activities */}
-        {displayDetail && displayDetail.activities.length > 0 && (
+        {displayDetail && (displayDetail.activities.length > 0 || (comparison && comparison.activities.removed.length > 0)) && (
           <div className="bg-white rounded-lg border p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold">Economic Activities</h2>
@@ -566,9 +604,9 @@ export default function EnterpriseDetailPage() {
               )}
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {/* Combine baseline (displayDetail) and added activities, grouped by version */}
+              {/* Combine baseline (displayDetail), added activities, and removed activities, grouped by version */}
               {(Object.entries(
-                [...displayDetail.activities, ...(comparison?.activities.added || [])].reduce((acc, activity) => {
+                [...displayDetail.activities, ...(comparison?.activities.added || []), ...(comparison?.activities.removed || [])].reduce((acc, activity) => {
                   const version = activity.naceVersion
                   if (!acc[version]) acc[version] = []
                   acc[version].push(activity)
@@ -583,12 +621,12 @@ export default function EnterpriseDetailPage() {
                     </h3>
                     <div className="space-y-1">
                       {activities.map((activity: typeof displayDetail.activities[0], idx: number) => {
-                        const key = `${activity.naceVersion}-${activity.naceCode}-${activity.classification}`
+                        const key = `${activity.activityGroup}-${activity.naceVersion}-${activity.naceCode}-${activity.classification}`
                         const isRemoved = comparison?.activities.removed.some(
-                          (a: typeof activity) => `${a.naceVersion}-${a.naceCode}-${a.classification}` === key
+                          (a: typeof activity) => `${a.activityGroup}-${a.naceVersion}-${a.naceCode}-${a.classification}` === key
                         )
                         const isAdded = comparison?.activities.added.some(
-                          (a: typeof activity) => `${a.naceVersion}-${a.naceCode}-${a.classification}` === key
+                          (a: typeof activity) => `${a.activityGroup}-${a.naceVersion}-${a.naceCode}-${a.classification}` === key
                         )
                         return (
                           <div
@@ -629,7 +667,7 @@ export default function EnterpriseDetailPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
           {/* Contacts */}
-          {displayDetail && displayDetail.contacts.length > 0 && (
+          {displayDetail && (displayDetail.contacts.length > 0 || (comparison && comparison.contacts.removed.length > 0)) && (
             <div className="bg-white rounded-lg border p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-xl font-semibold">Contact Information</h2>
@@ -707,7 +745,7 @@ export default function EnterpriseDetailPage() {
         </div>
 
         {/* Establishments */}
-        {displayDetail && displayDetail.establishments.length > 0 && (
+        {displayDetail && (displayDetail.establishments.length > 0 || (comparison && comparison.establishments.removed.length > 0)) && (
           <div className="bg-white rounded-lg border p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold">

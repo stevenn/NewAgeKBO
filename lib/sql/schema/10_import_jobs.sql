@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS import_jobs (
   status VARCHAR NOT NULL,                    -- 'pending', 'running', 'completed', 'failed'
   started_at TIMESTAMP,
   completed_at TIMESTAMP,
-  error_message TEXT,
+  error_message VARCHAR,
 
   -- Statistics
   records_processed BIGINT DEFAULT 0,

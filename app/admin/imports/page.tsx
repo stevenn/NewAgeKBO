@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
+import { ExpandableJobDetails } from './components/ExpandableJobDetails'
 
 interface ImportJob {
   id: string
@@ -19,19 +20,46 @@ export default function ImportsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(0)
+  const [total, setTotal] = useState(0)
+  const pageSize = 25
+
+  // Expanded jobs state
+  const [expandedJobIds, setExpandedJobIds] = useState<Set<string>>(new Set())
+
   const [triggerLoading, setTriggerLoading] = useState(false)
   const [triggerError, setTriggerError] = useState<string | null>(null)
   const [triggerSuccess, setTriggerSuccess] = useState(false)
 
+  const toggleJobExpansion = (jobId: string) => {
+    setExpandedJobIds(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(jobId)) {
+        newSet.delete(jobId)
+      } else {
+        newSet.add(jobId)
+      }
+      return newSet
+    })
+  }
+
   // Fetch import jobs from API
-  useEffect(() => {
-    fetch('/api/import-jobs')
+  const fetchJobs = (page: number) => {
+    setLoading(true)
+    setError(null)
+
+    fetch(`/api/import-jobs?page=${page}&limit=${pageSize}`)
       .then((res) => res.json())
       .then((data) => {
         if (data.error) {
           throw new Error(data.error)
         }
         setJobs(data.jobs)
+        setTotal(data.total)
+        setCurrentPage(data.page)
+        setTotalPages(data.totalPages)
       })
       .catch((err) => {
         console.error('Failed to load import jobs:', err)
@@ -40,7 +68,15 @@ export default function ImportsPage() {
       .finally(() => {
         setLoading(false)
       })
+  }
+
+  useEffect(() => {
+    fetchJobs(1)
   }, [])
+
+  const handlePageChange = (newPage: number) => {
+    fetchJobs(newPage)
+  }
 
   const handleTriggerDailyUpdate = async () => {
     setTriggerLoading(true)
@@ -151,7 +187,7 @@ export default function ImportsPage() {
         <div className="border-b p-4">
           <h2 className="text-lg font-semibold">Import History</h2>
           <p className="text-sm text-gray-600 mt-1">
-            Track all import jobs and their status
+            Track all import jobs and their status ({total.toLocaleString()} total)
           </p>
         </div>
 
@@ -168,58 +204,143 @@ export default function ImportsPage() {
             <div className="animate-pulse">Loading import jobs...</div>
           </div>
         ) : jobs.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b">
-                <tr>
-                  <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">
-                    Type
-                  </th>
-                  <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">
-                    Status
-                  </th>
-                  <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">
-                    Snapshot Date
-                  </th>
-                  <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">
-                    Extract #
-                  </th>
-                  <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">
-                    Started At
-                  </th>
-                  <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">
-                    Duration
-                  </th>
-                  <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">
-                    Records
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {jobs.map((job) => (
-                  <tr key={job.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 text-sm">{getTypeBadge(job.type)}</td>
-                    <td className="px-4 py-3 text-sm">{getStatusBadge(job.status)}</td>
-                    <td className="px-4 py-3 text-sm font-mono">
-                      {job.snapshotDate}
-                    </td>
-                    <td className="px-4 py-3 text-sm">{job.extractNumber}</td>
-                    <td className="px-4 py-3 text-sm">
-                      {job.startedAt
-                        ? new Date(job.startedAt).toLocaleString()
-                        : '-'}
-                    </td>
-                    <td className="px-4 py-3 text-sm">
-                      {formatDuration(job.startedAt, job.completedAt)}
-                    </td>
-                    <td className="px-4 py-3 text-sm">
-                      {job.recordsProcessed.toLocaleString()}
-                    </td>
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50 border-b">
+                  <tr>
+                    <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">
+                      Type
+                    </th>
+                    <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">
+                      Status
+                    </th>
+                    <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">
+                      Snapshot Date
+                    </th>
+                    <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">
+                      Extract #
+                    </th>
+                    <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">
+                      Started At
+                    </th>
+                    <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">
+                      Duration
+                    </th>
+                    <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">
+                      Records
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {jobs.map((job) => (
+                    <React.Fragment key={job.id}>
+                      <tr
+                        className={`border-b transition-colors ${
+                          job.status === 'completed'
+                            ? 'cursor-pointer hover:bg-gray-50'
+                            : 'bg-gray-50'
+                        }`}
+                        onClick={() => job.status === 'completed' && toggleJobExpansion(job.id)}
+                      >
+                        <td className="px-4 py-3 text-sm" style={{ width: '12%' }}>
+                          {getTypeBadge(job.type)}
+                        </td>
+                        <td className="px-4 py-3 text-sm" style={{ width: '12%' }}>
+                          {getStatusBadge(job.status)}
+                        </td>
+                        <td className="px-4 py-3 text-sm font-mono" style={{ width: '15%' }}>
+                          {job.snapshotDate}
+                        </td>
+                        <td className="px-4 py-3 text-sm" style={{ width: '10%' }}>
+                          {job.extractNumber}
+                        </td>
+                        <td className="px-4 py-3 text-sm" style={{ width: '20%' }}>
+                          {job.startedAt
+                            ? new Date(job.startedAt).toLocaleString()
+                            : '-'}
+                        </td>
+                        <td className="px-4 py-3 text-sm" style={{ width: '12%' }}>
+                          {formatDuration(job.startedAt, job.completedAt)}
+                        </td>
+                        <td className="px-4 py-3 text-sm" style={{ width: '15%' }}>
+                          {job.recordsProcessed.toLocaleString()}
+                        </td>
+                      </tr>
+                      {job.status === 'completed' && (
+                        <tr>
+                          <td colSpan={7} className="p-0">
+                            <ExpandableJobDetails
+                              jobId={job.id}
+                              extractNumber={job.extractNumber}
+                              isExpanded={expandedJobIds.has(job.id)}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="border-t p-4 flex items-center justify-between">
+                <div className="text-sm text-gray-600">
+                  Page {currentPage} of {totalPages}
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handlePageChange(currentPage - 1)}
+                    disabled={currentPage === 1 || loading}
+                    className="px-4 py-2 text-sm border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Previous
+                  </button>
+
+                  {/* Page numbers */}
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    // Show 5 pages centered around current page
+                    let pageNum
+                    if (totalPages <= 5) {
+                      pageNum = i + 1
+                    } else if (currentPage <= 3) {
+                      pageNum = i + 1
+                    } else if (currentPage >= totalPages - 2) {
+                      pageNum = totalPages - 4 + i
+                    } else {
+                      pageNum = currentPage - 2 + i
+                    }
+
+                    return (
+                      <button
+                        key={pageNum}
+                        onClick={() => handlePageChange(pageNum)}
+                        disabled={loading}
+                        className={`px-4 py-2 text-sm border rounded hover:bg-gray-50 disabled:opacity-50 ${
+                          pageNum === currentPage
+                            ? 'bg-blue-600 text-white hover:bg-blue-700'
+                            : ''
+                        }`}
+                      >
+                        {pageNum}
+                      </button>
+                    )
+                  })}
+
+                  <button
+                    onClick={() => handlePageChange(currentPage + 1)}
+                    disabled={currentPage === totalPages || loading}
+                    className="px-4 py-2 text-sm border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
         ) : (
           <div className="p-8 text-center text-gray-500">
             No import jobs found

@@ -123,10 +123,12 @@ export function compareEnterprises(
   })
 
   // Compare activities
+  // Note: Activity identity includes activityGroup as activities can have same NACE code
+  // but different groups (e.g., group 001 vs 006)
   current.activities.forEach((act) => {
-    const key = `${act.naceVersion}-${act.naceCode}-${act.classification}`
+    const key = `${act.activityGroup}-${act.naceVersion}-${act.naceCode}-${act.classification}`
     const exists = previous.activities.find(
-      (p) => `${p.naceVersion}-${p.naceCode}-${p.classification}` === key
+      (p) => `${p.activityGroup}-${p.naceVersion}-${p.naceCode}-${p.classification}` === key
     )
     if (exists) {
       comparison.activities.unchanged.push(act)
@@ -135,9 +137,9 @@ export function compareEnterprises(
     }
   })
   previous.activities.forEach((act) => {
-    const key = `${act.naceVersion}-${act.naceCode}-${act.classification}`
+    const key = `${act.activityGroup}-${act.naceVersion}-${act.naceCode}-${act.classification}`
     const exists = current.activities.find(
-      (c) => `${c.naceVersion}-${c.naceCode}-${c.classification}` === key
+      (c) => `${c.activityGroup}-${c.naceVersion}-${c.naceCode}-${c.classification}` === key
     )
     if (!exists) {
       comparison.activities.removed.push(act)

@@ -57,6 +57,15 @@ function shortHash(text: string): string {
 }
 
 /**
+ * Convert KBO timestamp format (DD-MM-YYYY HH:MM:SS) to SQL format (YYYY-MM-DD HH:MM:SS)
+ */
+function convertKboTimestampFormat(timestamp: string): string {
+  const [datePart, timePart] = timestamp.split(' ')
+  const [day, month, year] = datePart.split('-')
+  return `${year}-${month}-${day} ${timePart}`
+}
+
+/**
  * Parse metadata from meta.csv in ZIP
  */
 async function parseMetadata(zip: StreamZip.StreamZipAsync): Promise<Metadata> {
@@ -399,12 +408,8 @@ async function processDailyUpdate(zipPath: string): Promise<UpdateStats> {
   let jobId: string | undefined
 
   try {
-    // Connect to database from environment
-    const dbName = process.env.MOTHERDUCK_DATABASE
-    if (!dbName) {
-      throw new Error('MOTHERDUCK_DATABASE not set in environment')
-    }
-    await executeQuery(db, `USE ${dbName}`)
+    // Connection already switched to the Motherduck database via connectMotherduck()
+    // No need to USE again - the connection is ready to use
 
     // Step 1: Parse metadata
     console.log('📋 Reading metadata...')
@@ -422,6 +427,8 @@ async function processDailyUpdate(zipPath: string): Promise<UpdateStats> {
     console.log('\n📝 Creating import job record...')
     jobId = randomUUID()
     const jobStartTime = new Date().toISOString()
+    const snapshotDate = convertKboDateFormat(stats.metadata.SnapshotDate)
+    const extractTimestamp = convertKboTimestampFormat(stats.metadata.ExtractTimestamp)
 
     await executeQuery(
       db,
@@ -432,8 +439,8 @@ async function processDailyUpdate(zipPath: string): Promise<UpdateStats> {
         '${jobId}',
         ${stats.metadata.ExtractNumber},
         'update',
-        '${stats.metadata.SnapshotDate}',
-        '${stats.metadata.ExtractTimestamp}',
+        '${snapshotDate}',
+        '${extractTimestamp}',
         'running',
         '${jobStartTime}',
         'local'
