@@ -32,6 +32,7 @@ export default function ImportsPage() {
   const [triggerLoading, setTriggerLoading] = useState(false)
   const [triggerError, setTriggerError] = useState<string | null>(null)
   const [triggerSuccess, setTriggerSuccess] = useState(false)
+  const [importUrl, setImportUrl] = useState('')
 
   const toggleJobExpansion = (jobId: string) => {
     setExpandedJobIds(prev => {
@@ -79,15 +80,39 @@ export default function ImportsPage() {
   }
 
   const handleTriggerDailyUpdate = async () => {
+    if (!importUrl.trim()) {
+      setTriggerError('Please enter a URL or filename')
+      return
+    }
+
     setTriggerLoading(true)
     setTriggerError(null)
     setTriggerSuccess(false)
 
     try {
-      // This will be implemented to call the API route
-      // For now, show a message that it's not yet implemented
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-      throw new Error('Manual trigger not yet implemented - use CLI scripts for now')
+      const response = await fetch('/api/import/daily-update', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          url: importUrl.trim(),
+        }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || data.details || 'Failed to trigger import')
+      }
+
+      setTriggerSuccess(true)
+      setImportUrl('') // Clear the input
+
+      // Refresh the job list after a short delay
+      setTimeout(() => {
+        fetchJobs(currentPage)
+      }, 1000)
     } catch (err) {
       setTriggerError(err instanceof Error ? err.message : 'Failed to trigger import')
     } finally {
@@ -139,46 +164,73 @@ export default function ImportsPage() {
 
       {/* Manual Trigger Section */}
       <div className="bg-white rounded-lg border p-6 mb-6">
-        <h2 className="text-xl font-semibold mb-4">Manual Import Trigger</h2>
+        <h2 className="text-xl font-semibold mb-4">Import Daily Update</h2>
         <p className="text-gray-600 mb-4">
-          Manually trigger a daily update import. This will download the latest daily update file
-          from the KBO Open Data service and apply it to the database.
+          Import a daily update file from the KBO Open Data service. Enter the full URL or just the filename.
         </p>
 
         {triggerError && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
-            <p className="text-red-800">{triggerError}</p>
+            <p className="text-red-800 font-medium">Error</p>
+            <p className="text-red-700 text-sm mt-1">{triggerError}</p>
           </div>
         )}
 
         {triggerSuccess && (
           <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
-            <p className="text-green-800">Daily update import triggered successfully!</p>
+            <p className="text-green-800 font-medium">Success!</p>
+            <p className="text-green-700 text-sm mt-1">
+              Daily update import completed successfully. The job has been added to the history below.
+            </p>
           </div>
         )}
 
-        <div className="flex gap-4">
+        <div className="space-y-4">
+          <div>
+            <label htmlFor="importUrl" className="block text-sm font-medium text-gray-700 mb-2">
+              File URL or Filename
+            </label>
+            <input
+              id="importUrl"
+              type="text"
+              value={importUrl}
+              onChange={(e) => setImportUrl(e.target.value)}
+              placeholder="https://kbopub.economie.fgov.be/.../KboOpenData_0141_2025_10_06_Update.zip"
+              disabled={triggerLoading}
+              className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed font-mono text-sm"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !triggerLoading) {
+                  handleTriggerDailyUpdate()
+                }
+              }}
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Examples: <span className="font-mono">KboOpenData_0141_2025_10_06_Update.zip</span> or full URL
+            </p>
+          </div>
+
           <button
             onClick={handleTriggerDailyUpdate}
-            disabled={triggerLoading}
-            className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+            disabled={triggerLoading || !importUrl.trim()}
+            className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
           >
-            {triggerLoading ? 'Triggering...' : 'Trigger Daily Update'}
+            {triggerLoading ? (
+              <>
+                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                <span>Importing...</span>
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+                  <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                <span>Import Daily Update</span>
+              </>
+            )}
           </button>
-          <div className="flex items-center text-sm text-gray-600">
-            <svg
-              className="w-4 h-4 mr-2"
-              fill="none"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="2"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            For now, use CLI scripts to run imports
-          </div>
         </div>
       </div>
 

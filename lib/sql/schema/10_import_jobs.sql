@@ -25,12 +25,12 @@ CREATE TABLE IF NOT EXISTS import_jobs (
   records_deleted BIGINT DEFAULT 0,
 
   -- Worker info
-  worker_type VARCHAR NOT NULL,               -- 'local', 'vercel', or 'backfill'
+  worker_type VARCHAR NOT NULL,               -- 'local', 'vercel', 'backfill', or 'web_manual'
 
   -- Constraints
   CHECK (extract_type IN ('full', 'update')),
   CHECK (status IN ('pending', 'running', 'completed', 'failed')),
-  CHECK (worker_type IN ('local', 'vercel', 'backfill'))
+  CHECK (worker_type IN ('local', 'vercel', 'backfill', 'web_manual'))
 );
 
 -- Comments for documentation
@@ -38,4 +38,4 @@ COMMENT ON TABLE import_jobs IS 'Import job metadata and statistics for monitori
 COMMENT ON COLUMN import_jobs.extract_number IS 'Unique ID (e.g. 140)';
 COMMENT ON COLUMN import_jobs.extract_type IS 'full=Monthly full dataset, update=Daily incremental';
 COMMENT ON COLUMN import_jobs.status IS 'pending, running, success, failed';
-COMMENT ON COLUMN import_jobs.worker_type IS 'local, vercel, or backfill (for retroactively added records)';
+COMMENT ON COLUMN import_jobs.worker_type IS 'local (CLI), vercel (cron), backfill (retroactive), web_manual (admin UI trigger)';

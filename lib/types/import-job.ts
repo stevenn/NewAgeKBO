@@ -11,7 +11,7 @@ export enum ImportJobStatus {
 
 export type ImportJobType = 'full' | 'update'
 
-export type WorkerType = 'local' | 'vercel'
+export type WorkerType = 'local' | 'vercel' | 'backfill' | 'web_manual'
 
 export interface ImportJob {
   id: string // UUID
