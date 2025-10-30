@@ -381,13 +381,6 @@ export async function processDailyUpdate(
     zip = new StreamZip.async({ file: tempFilePath })
     db = await connectMotherduck()
 
-    const dbName = process.env.MOTHERDUCK_DATABASE
-    if (!dbName) {
-      throw new Error('MOTHERDUCK_DATABASE not set in environment')
-    }
-
-    await executeQuery(db, `USE ${dbName}`)
-
     // Step 1: Parse metadata
     console.log('📋 Reading metadata...')
     stats.metadata = await parseMetadata(zip)
@@ -404,6 +397,13 @@ export async function processDailyUpdate(
     const jobId = randomUUID()
     const jobStartTime = new Date().toISOString()
 
+    // Convert KBO date format (DD-MM-YYYY) to SQL format (YYYY-MM-DD)
+    const snapshotDateSql = convertKboDateFormat(stats.metadata.SnapshotDate)
+
+    // Convert KBO timestamp format (DD-MM-YYYY HH:MM:SS) to SQL format (YYYY-MM-DD HH:MM:SS)
+    const [datePart, timePart] = stats.metadata.ExtractTimestamp.split(' ')
+    const extractTimestampSql = `${convertKboDateFormat(datePart)} ${timePart}`
+
     await executeQuery(db, `INSERT INTO import_jobs (
         id, extract_number, extract_type, snapshot_date, extract_timestamp,
         status, started_at, worker_type
@@ -411,8 +411,8 @@ export async function processDailyUpdate(
         '${jobId}',
         ${stats.metadata.ExtractNumber},
         'update',
-        '${stats.metadata.SnapshotDate}',
-        '${stats.metadata.ExtractTimestamp}',
+        '${snapshotDateSql}',
+        '${extractTimestampSql}',
         'running',
         '${jobStartTime}',
         '${workerType}'

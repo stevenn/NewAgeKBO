@@ -3,6 +3,10 @@ import { checkAdminAccess } from '@/lib/auth/check-admin'
 import { downloadFile, extractFileMetadata } from '@/lib/kbo-client'
 import { processDailyUpdate } from '@/lib/import/daily-update'
 
+// Vercel serverless function configuration
+export const maxDuration = 300 // 5 minutes for large imports (requires Pro plan)
+export const dynamic = 'force-dynamic' // Disable caching for import operations
+
 /**
  * POST /api/import/daily-update
  * Trigger a daily update import from the KBO portal
