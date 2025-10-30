@@ -101,8 +101,8 @@ export async function POST(request: NextRequest) {
       // Return success response
       return NextResponse.json({
         success: true,
-        extract_number: parseInt(stats.metadata.ExtractNumber),
-        snapshot_date: stats.metadata.SnapshotDate,
+        extract_number: stats.metadata.extractNumber,
+        snapshot_date: stats.metadata.snapshotDate,
         records_processed: stats.deletesApplied + stats.insertsApplied,
         records_inserted: stats.insertsApplied,
         records_deleted: stats.deletesApplied,

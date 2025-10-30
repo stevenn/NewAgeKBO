@@ -19,9 +19,11 @@ CREATE TABLE IF NOT EXISTS import_jobs (
   error_message VARCHAR,
 
   -- Statistics
+  -- NOTE: records_processed = records_inserted + records_deleted (always)
+  -- NOTE: records_updated is always 0 (KBO uses delete-then-insert pattern, not in-place updates)
   records_processed BIGINT DEFAULT 0,
   records_inserted BIGINT DEFAULT 0,
-  records_updated BIGINT DEFAULT 0,
+  records_updated BIGINT DEFAULT 0,           -- Always 0 by design
   records_deleted BIGINT DEFAULT 0,
 
   -- Worker info
@@ -37,5 +39,6 @@ CREATE TABLE IF NOT EXISTS import_jobs (
 COMMENT ON TABLE import_jobs IS 'Import job metadata and statistics for monitoring';
 COMMENT ON COLUMN import_jobs.extract_number IS 'Unique ID (e.g. 140)';
 COMMENT ON COLUMN import_jobs.extract_type IS 'full=Monthly full dataset, update=Daily incremental';
-COMMENT ON COLUMN import_jobs.status IS 'pending, running, success, failed';
+COMMENT ON COLUMN import_jobs.status IS 'pending, running, completed, failed';
 COMMENT ON COLUMN import_jobs.worker_type IS 'local (CLI), vercel (cron), backfill (retroactive), web_manual (admin UI trigger)';
+COMMENT ON COLUMN import_jobs.records_updated IS 'Always 0 - KBO uses delete-then-insert pattern, not in-place updates';

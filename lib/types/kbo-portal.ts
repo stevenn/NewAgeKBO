@@ -3,6 +3,7 @@
  */
 
 import { ImportJobType } from './import-job'
+import { Metadata } from '../import/metadata'
 
 /**
  * Represents a dataset file available on the KBO portal
@@ -43,13 +44,8 @@ export interface KboAuthResult {
  * Statistics returned from a daily update import
  */
 export interface DailyUpdateStats {
-  metadata: {
-    SnapshotDate: string
-    ExtractTimestamp: string
-    ExtractType: string
-    ExtractNumber: string
-    Version: string
-  }
+  /** Standardized metadata from meta.csv (dates in YYYY-MM-DD format, extractNumber as number) */
+  metadata: Metadata
   tablesProcessed: string[]
   deletesApplied: number
   insertsApplied: number

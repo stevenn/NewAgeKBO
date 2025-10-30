@@ -6,6 +6,7 @@
 
 import * as duckdb from 'duckdb'
 import { join } from 'path'
+import { ImportJobType } from '../types/import-job'
 
 /**
  * Metadata from meta.csv
@@ -13,7 +14,7 @@ import { join } from 'path'
 export interface Metadata {
   snapshotDate: string      // YYYY-MM-DD format (converted from DD-MM-YYYY)
   extractNumber: number     // Extract sequence number (e.g., 140, 141)
-  extractType: string       // 'full' or 'update'
+  extractType: ImportJobType       // 'full' or 'update'
   version: string          // Version string (e.g., 'R018.00')
   extractTimestamp?: string // Optional timestamp
 }
@@ -80,7 +81,7 @@ export async function parseMetadataWithDuckDB(
   return {
     snapshotDate,
     extractNumber: parseInt(metadata.ExtractNumber, 10),
-    extractType: metadata.ExtractType,
+    extractType: metadata.ExtractType as ImportJobType,
     version: metadata.Version || 'unknown',
     extractTimestamp: metadata.ExtractTimestamp
   }
@@ -138,7 +139,7 @@ export function parseMetadataFromContent(metaContent: string): Metadata {
   return {
     snapshotDate,
     extractNumber: parseInt(metadata.ExtractNumber, 10),
-    extractType: metadata.ExtractType,
+    extractType: metadata.ExtractType as ImportJobType,
     version: metadata.Version || 'unknown',
     extractTimestamp: metadata.ExtractTimestamp
   }
@@ -147,7 +148,7 @@ export function parseMetadataFromContent(metaContent: string): Metadata {
 /**
  * Validate extract type (must be 'full' or 'update')
  */
-export function validateExtractType(metadata: Metadata, expected: 'full' | 'update'): void {
+export function validateExtractType(metadata: Metadata, expected: ImportJobType): void {
   if (metadata.extractType !== expected) {
     throw new Error(
       `Expected extract type '${expected}', got '${metadata.extractType}' (Extract #${metadata.extractNumber})`

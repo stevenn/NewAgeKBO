@@ -60,8 +60,9 @@ export async function GET(
       const result = await getAffectedEnterprises(connection, extractNumber, page, limit)
 
       // Convert result to JSON-serializable format (handle BigInt)
+      // Use String for BigInt to prevent overflow (values > 2^53)
       return NextResponse.json(JSON.parse(JSON.stringify(result, (_, value) =>
-        typeof value === 'bigint' ? Number(value) : value
+        typeof value === 'bigint' ? String(value) : value
       )))
     } finally {
       await closeMotherduck(connection)

@@ -15,8 +15,9 @@ import {
   convertKboDateFormat,
   isKboDateFormat
 } from '../utils/column-mapping'
-import { WorkerType } from '../types/import-job'
+import { WorkerType, ImportJobType } from '../types/import-job'
 import { DailyUpdateStats } from '../types/kbo-portal'
+import { Metadata } from './metadata'
 import { tmpdir } from 'os'
 import { writeFileSync, unlinkSync } from 'fs'
 import { join } from 'path'
@@ -26,7 +27,11 @@ interface MetaRecord {
   Value?: string
 }
 
-interface Metadata {
+/**
+ * Raw metadata from CSV (PascalCase, string types)
+ * Internal use only - gets converted to standardized Metadata type
+ */
+interface RawMetadata {
   SnapshotDate: string
   ExtractTimestamp: string
   ExtractType: string
@@ -44,8 +49,9 @@ function shortHash(text: string): string {
 
 /**
  * Parse metadata from meta.csv in ZIP
+ * Returns raw metadata from CSV (PascalCase, string types)
  */
-async function parseMetadata(zip: StreamZip.StreamZipAsync): Promise<Metadata> {
+async function parseMetadata(zip: StreamZip.StreamZipAsync): Promise<RawMetadata> {
   const metaContent = await zip.entryData('meta.csv')
   const metaRecords = parse(metaContent.toString(), {
     columns: true,
@@ -58,6 +64,39 @@ async function parseMetadata(zip: StreamZip.StreamZipAsync): Promise<Metadata> {
     ExtractType: metaRecords.find((r) => r.Variable === 'ExtractType')?.Value || metaRecords[2]?.Value || '',
     ExtractNumber: metaRecords.find((r) => r.Variable === 'ExtractNumber')?.Value || metaRecords[3]?.Value || '',
     Version: metaRecords.find((r) => r.Variable === 'Version')?.Value || metaRecords[4]?.Value || ''
+  }
+}
+
+/**
+ * Convert raw CSV metadata to standardized Metadata format
+ * - Converts dates from DD-MM-YYYY to YYYY-MM-DD
+ * - Converts ExtractNumber from string to number
+ * - Normalizes field names to camelCase
+ */
+function convertMetadata(raw: RawMetadata): Metadata {
+  // Validate and convert snapshot date
+  const snapshotDate = convertKboDateFormat(raw.SnapshotDate)
+
+  // Validate and convert extract timestamp
+  const timestampParts = raw.ExtractTimestamp.split(' ')
+  if (timestampParts.length !== 2) {
+    throw new Error(`Invalid ExtractTimestamp format: ${raw.ExtractTimestamp}, expected 'DD-MM-YYYY HH:MM:SS'`)
+  }
+  const [datePart, timePart] = timestampParts
+  const extractTimestamp = `${convertKboDateFormat(datePart)} ${timePart}`
+
+  // Validate and convert extract number
+  const extractNumber = parseInt(raw.ExtractNumber, 10)
+  if (isNaN(extractNumber)) {
+    throw new Error(`Invalid ExtractNumber: ${raw.ExtractNumber}`)
+  }
+
+  return {
+    snapshotDate,
+    extractNumber,
+    extractType: raw.ExtractType as ImportJobType,
+    version: raw.Version,
+    extractTimestamp
   }
 }
 
@@ -88,7 +127,7 @@ async function applyDeletes(
     const csvPkColumn = Object.keys(records[0])[0]
     const dbPkColumn = csvColumnToDbColumn(csvPkColumn)
     const entityNumbers = records.map((r: any) => `'${r[csvPkColumn]}'`).join(',')
-    const extractNumber = parseInt(metadata.ExtractNumber)
+    const extractNumber = metadata.extractNumber
 
     const sql = `
       UPDATE ${dbTableName}
@@ -170,8 +209,8 @@ async function applyInserts(
       }
     }
 
-    const snapshotDate = convertKboDateFormat(metadata.SnapshotDate)
-    const extractNumber = parseInt(metadata.ExtractNumber)
+    const snapshotDate = metadata.snapshotDate
+    const extractNumber = metadata.extractNumber
     const csvColumns = Object.keys(uniqueRecords[0])
     const dbColumns = csvColumns.map(col => csvColumnToDbColumn(col))
 
@@ -217,7 +256,10 @@ async function applyInserts(
           return `'${converted}'`
         }
 
-        // Escape single quotes
+        // SECURITY: Escape single quotes for SQL string literals
+        // Uses SQL standard escaping: ' becomes ''
+        // This is safe for DuckDB/SQL injection prevention
+        // DO NOT MODIFY without security review
         return `'${val.replace(/'/g, "''")}'`
       })
 
@@ -283,8 +325,8 @@ async function applyInserts(
  * to use actual names from the denominations table
  */
 async function resolvePrimaryNames(db: any, metadata: Metadata): Promise<number> {
-  const snapshotDate = convertKboDateFormat(metadata.SnapshotDate)
-  const extractNumber = parseInt(metadata.ExtractNumber)
+  const snapshotDate = metadata.snapshotDate
+  const extractNumber = metadata.extractNumber
 
   const sql = `
     UPDATE enterprises e
@@ -362,11 +404,11 @@ export async function processDailyUpdate(
 
   const stats: DailyUpdateStats = {
     metadata: {
-      SnapshotDate: '',
-      ExtractTimestamp: '',
-      ExtractType: '',
-      ExtractNumber: '',
-      Version: ''
+      snapshotDate: '',
+      extractNumber: 0,
+      extractType: 'update' as ImportJobType,
+      version: '',
+      extractTimestamp: ''
     },
     tablesProcessed: [],
     deletesApplied: 0,
@@ -376,43 +418,39 @@ export async function processDailyUpdate(
 
   let zip: StreamZip.StreamZipAsync | null = null
   let db: any = null
+  let jobId: string | null = null
 
   try {
     zip = new StreamZip.async({ file: tempFilePath })
     db = await connectMotherduck()
 
-    // Step 1: Parse metadata
+    // Step 1: Parse and convert metadata
     console.log('📋 Reading metadata...')
-    stats.metadata = await parseMetadata(zip)
-    console.log(`   ✓ Snapshot Date: ${stats.metadata.SnapshotDate}`)
-    console.log(`   ✓ Extract Number: ${stats.metadata.ExtractNumber}`)
-    console.log(`   ✓ Extract Type: ${stats.metadata.ExtractType}`)
+    const rawMetadata = await parseMetadata(zip)
+    stats.metadata = convertMetadata(rawMetadata)
+    console.log(`   ✓ Snapshot Date: ${stats.metadata.snapshotDate}`)
+    console.log(`   ✓ Extract Number: ${stats.metadata.extractNumber}`)
+    console.log(`   ✓ Extract Type: ${stats.metadata.extractType}`)
 
-    if (stats.metadata.ExtractType !== 'update') {
-      throw new Error(`Expected 'update' extract type, got '${stats.metadata.ExtractType}'`)
+    if (stats.metadata.extractType !== 'update') {
+      throw new Error(`Expected 'update' extract type, got '${stats.metadata.extractType}'`)
     }
 
     // Step 2: Create import job record
     console.log('\n📝 Creating import job record...')
-    const jobId = randomUUID()
+    jobId = randomUUID()
     const jobStartTime = new Date().toISOString()
 
-    // Convert KBO date format (DD-MM-YYYY) to SQL format (YYYY-MM-DD)
-    const snapshotDateSql = convertKboDateFormat(stats.metadata.SnapshotDate)
-
-    // Convert KBO timestamp format (DD-MM-YYYY HH:MM:SS) to SQL format (YYYY-MM-DD HH:MM:SS)
-    const [datePart, timePart] = stats.metadata.ExtractTimestamp.split(' ')
-    const extractTimestampSql = `${convertKboDateFormat(datePart)} ${timePart}`
-
+    // Metadata is already in SQL format (YYYY-MM-DD) after conversion
     await executeQuery(db, `INSERT INTO import_jobs (
         id, extract_number, extract_type, snapshot_date, extract_timestamp,
         status, started_at, worker_type
       ) VALUES (
         '${jobId}',
-        ${stats.metadata.ExtractNumber},
+        ${stats.metadata.extractNumber},
         'update',
-        '${snapshotDateSql}',
-        '${extractTimestampSql}',
+        '${stats.metadata.snapshotDate}',
+        '${stats.metadata.extractTimestamp}',
         'running',
         '${jobStartTime}',
         '${workerType}'
@@ -491,16 +529,23 @@ export async function processDailyUpdate(
       console.log(`\n   ✓ Job ${jobStatus}: ${jobId}`)
     }
   } catch (error: any) {
-    // If there's a job ID in scope, mark it as failed
-    if (db) {
+    // If a job was created, mark it as failed
+    if (db && jobId) {
       try {
         const errorMessage = error.message || 'Unknown error'
-        // This is a best-effort update, we don't have jobId in this scope
-        // The calling code should handle this case
-        throw error
+        const escapedError = errorMessage.replace(/'/g, "''")
+        await executeQuery(db, `UPDATE import_jobs SET
+            status = 'failed',
+            completed_at = '${new Date().toISOString()}',
+            error_message = '${escapedError}'
+          WHERE id = '${jobId}'`)
+        console.error(`\n   ❌ Job failed: ${jobId}`)
+        console.error(`   Error: ${errorMessage}`)
       } catch (updateError) {
-        console.error('Failed to update job status:', updateError)
+        console.error('Failed to update job status to failed:', updateError)
       }
+    } else {
+      console.error(`\n   ❌ Import failed: ${error.message}`)
     }
     throw error
   } finally {
