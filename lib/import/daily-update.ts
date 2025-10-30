@@ -104,7 +104,8 @@ function convertMetadata(raw: RawMetadata): Metadata {
  * Apply delete operations (mark as historical, don't actually delete)
  */
 async function applyDeletes(
-  db: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  db: any, // DuckDB connection type not available from @duckdb/node-api
   zip: StreamZip.StreamZipAsync,
   csvTableName: string,
   dbTableName: string,
@@ -126,7 +127,7 @@ async function applyDeletes(
 
     const csvPkColumn = Object.keys(records[0])[0]
     const dbPkColumn = csvColumnToDbColumn(csvPkColumn)
-    const entityNumbers = records.map((r: any) => `'${r[csvPkColumn]}'`).join(',')
+    const entityNumbers = records.map((r: Record<string, string>) => `'${r[csvPkColumn]}'`).join(',')
     const extractNumber = metadata.extractNumber
 
     const sql = `
@@ -140,8 +141,9 @@ async function applyDeletes(
     await executeStatement(db, sql)
     console.log(`   ✓ ${dbTableName}: Marked ${records.length} records as historical`)
     return records.length
-  } catch (error: any) {
-    if (error.message?.includes('Entry not found')) {
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : ''
+    if (errorMessage.includes('Entry not found')) {
       console.log(`   ℹ️  ${dbTableName}: No delete file`)
       return 0
     }
@@ -153,7 +155,8 @@ async function applyDeletes(
  * Apply insert operations
  */
 async function applyInserts(
-  db: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  db: any, // DuckDB connection type not available from @duckdb/node-api
   zip: StreamZip.StreamZipAsync,
   csvTableName: string,
   dbTableName: string,
@@ -174,7 +177,7 @@ async function applyInserts(
     }
 
     // Deduplicate records
-    const uniqueRecords: any[] = []
+    const uniqueRecords: Record<string, string>[] = []
     const seen = new Set<string>()
 
     for (const record of records) {
@@ -190,9 +193,9 @@ async function applyInserts(
     }
 
     // For enterprises, fetch existing names for re-insertion
-    const enterpriseNames = new Map<string, any>()
+    const enterpriseNames = new Map<string, Record<string, string>>()
     if (dbTableName === 'enterprises') {
-      const enterpriseNumbers = uniqueRecords.map((r: any) => `'${r['EnterpriseNumber']}'`).join(',')
+      const enterpriseNumbers = uniqueRecords.map((r: Record<string, string>) => `'${r['EnterpriseNumber']}'`).join(',')
       const existingRecords = await executeQuery(db, `
         SELECT enterprise_number, primary_name, primary_name_language,
                primary_name_nl, primary_name_fr, primary_name_de
@@ -226,7 +229,7 @@ async function applyInserts(
       allColumns = [...dbColumns, '_snapshot_date', '_extract_number', '_is_current']
     }
 
-    const values = uniqueRecords.map((record: any) => {
+    const values = uniqueRecords.map((record: Record<string, string>) => {
       // Compute ID for tables that need it
       let computedId: string | null = null
       if (needsComputedId) {
@@ -310,8 +313,9 @@ async function applyInserts(
     await executeStatement(db, sql)
     console.log(`   ✓ ${dbTableName}: Inserted ${uniqueRecords.length} records`)
     return uniqueRecords.length
-  } catch (error: any) {
-    if (error.message?.includes('Entry not found')) {
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : ''
+    if (errorMessage.includes('Entry not found')) {
       console.log(`   ℹ️  ${dbTableName}: No insert file`)
       return 0
     }
@@ -324,7 +328,11 @@ async function applyInserts(
  * Updates enterprises where primary_name is the enterprise number (temporary placeholder)
  * to use actual names from the denominations table
  */
-async function resolvePrimaryNames(db: any, metadata: Metadata): Promise<number> {
+async function resolvePrimaryNames(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  db: any, // DuckDB connection type not available from @duckdb/node-api
+  metadata: Metadata
+): Promise<number> {
   const snapshotDate = metadata.snapshotDate
   const extractNumber = metadata.extractNumber
 
@@ -417,7 +425,8 @@ export async function processDailyUpdate(
   }
 
   let zip: StreamZip.StreamZipAsync | null = null
-  let db: any = null
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let db: any = null // DuckDB connection type not available from @duckdb/node-api
   let jobId: string | null = null
 
   try {
@@ -486,8 +495,9 @@ export async function processDailyUpdate(
         stats.insertsApplied += inserts
 
         stats.tablesProcessed.push(dbTableName)
-      } catch (error: any) {
-        const errorMsg = `${dbTableName}: ${error.message}`
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+        const errorMsg = `${dbTableName}: ${errorMessage}`
         stats.errors.push(errorMsg)
         console.error(`   ❌ ${errorMsg}`)
       }
@@ -503,8 +513,9 @@ export async function processDailyUpdate(
         } else {
           console.log(`   ℹ️  No new enterprises requiring name resolution`)
         }
-      } catch (error: any) {
-        const errorMsg = `Primary name resolution: ${error.message}`
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+        const errorMsg = `Primary name resolution: ${errorMessage}`
         stats.errors.push(errorMsg)
         console.error(`   ❌ ${errorMsg}`)
       }
@@ -528,11 +539,11 @@ export async function processDailyUpdate(
 
       console.log(`\n   ✓ Job ${jobStatus}: ${jobId}`)
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     // If a job was created, mark it as failed
     if (db && jobId) {
       try {
-        const errorMessage = error.message || 'Unknown error'
         const escapedError = errorMessage.replace(/'/g, "''")
         await executeQuery(db, `UPDATE import_jobs SET
             status = 'failed',
@@ -545,7 +556,7 @@ export async function processDailyUpdate(
         console.error('Failed to update job status to failed:', updateError)
       }
     } else {
-      console.error(`\n   ❌ Import failed: ${error.message}`)
+      console.error(`\n   ❌ Import failed: ${errorMessage}`)
     }
     throw error
   } finally {
@@ -558,7 +569,7 @@ export async function processDailyUpdate(
     // Clean up temporary file
     try {
       unlinkSync(tempFilePath)
-    } catch (e) {
+    } catch {
       // Ignore cleanup errors
     }
   }

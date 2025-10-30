@@ -78,12 +78,13 @@ export async function POST(request: NextRequest) {
     try {
       zipBuffer = await downloadFile(downloadUrl)
       console.log(`   ✓ Downloaded ${zipBuffer.length} bytes`)
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Download failed:', error)
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       return NextResponse.json(
         {
           error: 'Failed to download file from KBO portal',
-          details: error.message
+          details: errorMessage
         },
         { status: 502 } // Bad Gateway - external service error
       )
@@ -109,11 +110,12 @@ export async function POST(request: NextRequest) {
         tables_processed: stats.tablesProcessed,
         errors: stats.errors.length > 0 ? stats.errors : undefined
       })
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Import processing failed:', error)
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
 
       // Check if it's a duplicate extract error
-      if (error.message?.includes('UNIQUE constraint') || error.message?.includes('duplicate key')) {
+      if (errorMessage.includes('UNIQUE constraint') || errorMessage.includes('duplicate key')) {
         return NextResponse.json(
           {
             error: 'This extract has already been imported',
@@ -127,17 +129,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error: 'Failed to process import',
-          details: error.message
+          details: errorMessage
         },
         { status: 500 }
       )
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Unexpected error in daily update import:', error)
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     return NextResponse.json(
       {
         error: 'Internal server error',
-        details: error.message
+        details: errorMessage
       },
       { status: 500 }
     )

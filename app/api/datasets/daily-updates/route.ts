@@ -42,12 +42,13 @@ export async function GET() {
     } finally {
       await closeMotherduck(connection)
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Failed to fetch daily updates:', error)
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     return NextResponse.json(
       {
         error: 'Failed to fetch daily updates',
-        details: error.message
+        details: errorMessage
       },
       { status: 500 }
     )
