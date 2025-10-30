@@ -6,10 +6,12 @@ import { useParams, useSearchParams } from 'next/navigation'
 import type { EnterpriseDetail } from '@/app/api/enterprises/[number]/route'
 import type { Snapshot } from '@/app/api/enterprises/[number]/snapshots/route'
 import { compareEnterprises } from '@/lib/utils/compare-snapshots'
+import { useLanguage } from '@/lib/contexts/language-context'
 
 export default function EnterpriseDetailPage() {
   const params = useParams()
   const searchParams = useSearchParams()
+  const { language } = useLanguage()
   const number = params.number as string
   const fromExtract = searchParams.get('from_extract')
 
@@ -76,6 +78,7 @@ export default function EnterpriseDetailPage() {
         const params = new URLSearchParams({
           snapshot_date: selectedSnapshot.snapshotDate,
           extract_number: selectedSnapshot.extractNumber.toString(),
+          language: language,
         })
 
         // Fetch current selected snapshot
@@ -99,6 +102,7 @@ export default function EnterpriseDetailPage() {
             const prevParams = new URLSearchParams({
               snapshot_date: previousSnapshot.snapshotDate,
               extract_number: previousSnapshot.extractNumber.toString(),
+              language: language,
             })
 
             const prevRes = await fetch(`/api/enterprises/${number}?${prevParams}`)
@@ -122,7 +126,7 @@ export default function EnterpriseDetailPage() {
 
     fetchDetailAndPrevious()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [number, selectedSnapshot, snapshots])
+  }, [number, selectedSnapshot, snapshots, language])
 
   if (error) {
     return (
@@ -207,6 +211,17 @@ export default function EnterpriseDetailPage() {
                 Viewing historical snapshot
               </span>
             )}
+            {!displayDetail.isCurrent && displayDetail.lastSnapshotDate && (
+              <div className="mt-2 flex items-center gap-2 text-xs text-red-700">
+                <svg className="w-4 h-4 flex-shrink-0" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+                  <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <span>
+                  Company deleted after {displayDetail.lastSnapshotDate}
+                  {displayDetail.deletedAtExtract && ` (Extract #${displayDetail.deletedAtExtract})`}
+                </span>
+              </div>
+            )}
           </div>
           {comparison && previousDetail && (
             <div className="mt-3 pt-3 border-t border-blue-300">
@@ -233,6 +248,49 @@ export default function EnterpriseDetailPage() {
       )}
 
       <div className="space-y-6">
+        {/* Cessation Alert Banner */}
+        {!displayDetail.isCurrent && (
+          <div className="bg-red-50 border-2 border-red-200 rounded-lg p-4">
+            <div className="flex items-start gap-3">
+              <svg className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+                <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <div className="flex-1">
+                <h3 className="text-lg font-semibold text-red-900 mb-2">
+                  This company no longer exists in current KBO data
+                </h3>
+                <div className="space-y-1 text-sm text-red-800">
+                  <p>
+                    <span className="font-medium">Status:</span>{' '}
+                    {displayDetail.status === 'ST' ? 'Ceased (ST)' : displayDetail.status === 'AC' ? 'Active (AC)' : displayDetail.status}
+                    {displayDetail.statusDescription && ` - ${displayDetail.statusDescription}`}
+                  </p>
+                  {displayDetail.lastSnapshotDate && (
+                    <p>
+                      <span className="font-medium">Last appeared in KBO data:</span>{' '}
+                      {displayDetail.lastSnapshotDate}
+                    </p>
+                  )}
+                  {displayDetail.deletedAtExtract && (
+                    <p>
+                      <span className="font-medium">Deleted in:</span>{' '}
+                      <Link
+                        href={`/admin/imports?highlight=${displayDetail.deletedAtExtract}`}
+                        className="text-red-900 underline hover:text-red-700"
+                      >
+                        Extract #{displayDetail.deletedAtExtract}
+                      </Link>
+                    </p>
+                  )}
+                  <p className="text-xs mt-2 text-red-700">
+                    You are viewing historical data. This enterprise was removed from the KBO Open Data dataset.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Header */}
         <div className="bg-white rounded-lg border p-6">
           <div className="flex justify-between items-start mb-4">
@@ -249,13 +307,21 @@ export default function EnterpriseDetailPage() {
                   <span className="w-2 h-2 rounded-full bg-yellow-500" title="Status changed"></span>
                 )}
                 <span
-                  className={`inline-block px-3 py-1 rounded text-sm font-medium ${
+                  className={`inline-block px-3 py-1 rounded text-sm font-medium flex items-center gap-1 ${
                     displayDetail.status === 'AC'
                       ? 'bg-green-100 text-green-800'
+                      : displayDetail.status === 'ST'
+                      ? 'bg-red-100 text-red-800'
                       : 'bg-gray-100 text-gray-800'
                   }`}
+                  title={displayDetail.statusDescription || undefined}
                 >
-                  {displayDetail.status === 'AC' ? 'Active' : displayDetail.status}
+                  {displayDetail.status === 'ST' && (
+                    <svg className="w-4 h-4" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+                      <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                  )}
+                  {displayDetail.status === 'AC' ? 'Active' : displayDetail.status === 'ST' ? 'Ceased' : displayDetail.status}
                 </span>
               </div>
               {comparison && comparison.status.type === 'changed' && (
@@ -646,9 +712,9 @@ export default function EnterpriseDetailPage() {
                                 <span className="text-xs bg-red-500 text-white px-1.5 py-0.5 rounded">Removed in selected</span>
                               )}
                             </div>
-                            {activity.naceDescriptionNL && (
+                            {(language === 'FR' ? activity.naceDescriptionFR : activity.naceDescriptionNL) && (
                               <span className={`text-gray-700 text-xs mt-0.5 ${isRemoved ? 'line-through' : ''}`}>
-                                {activity.naceDescriptionNL}
+                                {language === 'FR' ? activity.naceDescriptionFR : activity.naceDescriptionNL}
                               </span>
                             )}
                             <span className="text-gray-500 text-xs mt-0.5">

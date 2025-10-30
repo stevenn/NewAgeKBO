@@ -1,6 +1,7 @@
 import { executeQuery } from './index'
 import type { DuckDBConnection } from '@duckdb/node-api'
 import type { EnterpriseDetail } from '@/app/api/enterprises/[number]/route'
+import type { Language } from '@/lib/types/codes'
 import {
   buildChildTableQuery,
   buildPointInTimeQuery,
@@ -17,11 +18,13 @@ import { getDenominationTypeDescription, getLanguageAbbreviation } from '@/lib/c
  * @param connection - Database connection
  * @param enterpriseNumber - Enterprise number to fetch
  * @param filter - Temporal filter (current or point-in-time)
+ * @param language - Language for code descriptions (NL, FR, or DE)
  */
 export async function fetchEnterpriseDetail(
   connection: DuckDBConnection,
   enterpriseNumber: string,
-  filter: TemporalFilter
+  filter: TemporalFilter,
+  language: Language = 'NL'
 ): Promise<EnterpriseDetail | null> {
   const usePointInTime = filter.type === 'point-in-time'
 
@@ -39,7 +42,9 @@ export async function fetchEnterpriseDetail(
          sub.type_of_enterprise_description,
          sub.start_date::VARCHAR as start_date,
          sub._snapshot_date::VARCHAR as _snapshot_date,
-         sub._extract_number`,
+         sub._extract_number,
+         sub._is_current,
+         sub._deleted_at_extract`,
         `(SELECT
            e.*,
            c_status.description as status_description,
@@ -49,16 +54,16 @@ export async function fetchEnterpriseDetail(
          FROM enterprises e
          LEFT JOIN codes c_status ON c_status.category = 'Status'
            AND c_status.code = e.status
-           AND c_status.language = 'NL'
+           AND c_status.language = '${language}'
          LEFT JOIN codes c_jf ON c_jf.category = 'JuridicalForm'
            AND c_jf.code = e.juridical_form
-           AND c_jf.language = 'NL'
+           AND c_jf.language = '${language}'
          LEFT JOIN codes c_js ON c_js.category = 'JuridicalSituation'
            AND c_js.code = e.juridical_situation
-           AND c_js.language = 'NL'
+           AND c_js.language = '${language}'
          LEFT JOIN codes c_type ON c_type.category = 'TypeOfEnterprise'
            AND c_type.code = e.type_of_enterprise
-           AND c_type.language = 'NL'
+           AND c_type.language = '${language}'
          WHERE e.enterprise_number = '${enterpriseNumber}' AND ${buildTemporalFilter(filter, 'e')})`,
         `1=1`, // WHERE clause already in subquery
         'enterprise_number'
@@ -75,20 +80,22 @@ export async function fetchEnterpriseDetail(
         c_type.description as type_of_enterprise_description,
         e.start_date::VARCHAR as start_date,
         e._snapshot_date::VARCHAR as _snapshot_date,
-        e._extract_number
+        e._extract_number,
+        e._is_current,
+        e._deleted_at_extract
       FROM enterprises e
       LEFT JOIN codes c_status ON c_status.category = 'Status'
         AND c_status.code = e.status
-        AND c_status.language = 'NL'
+        AND c_status.language = '${language}'
       LEFT JOIN codes c_jf ON c_jf.category = 'JuridicalForm'
         AND c_jf.code = e.juridical_form
-        AND c_jf.language = 'NL'
+        AND c_jf.language = '${language}'
       LEFT JOIN codes c_js ON c_js.category = 'JuridicalSituation'
         AND c_js.code = e.juridical_situation
-        AND c_js.language = 'NL'
+        AND c_js.language = '${language}'
       LEFT JOIN codes c_type ON c_type.category = 'TypeOfEnterprise'
         AND c_type.code = e.type_of_enterprise
-        AND c_type.language = 'NL'
+        AND c_type.language = '${language}'
       WHERE e.enterprise_number = '${enterpriseNumber}'
         AND ${buildTemporalFilter(filter, 'e')}
       LIMIT 1`
@@ -107,6 +114,8 @@ export async function fetchEnterpriseDetail(
     start_date: string | null
     _snapshot_date: string
     _extract_number: number
+    _is_current: boolean
+    _deleted_at_extract: number | null
   }>(connection, enterpriseQuery)
 
   if (enterprises.length === 0) {
@@ -114,6 +123,18 @@ export async function fetchEnterpriseDetail(
   }
 
   const enterprise = enterprises[0]
+
+  // For deleted enterprises, find the last snapshot date where they appeared
+  let lastSnapshotDate: string | null = null
+  if (!enterprise._is_current) {
+    const lastSnapshot = await executeQuery<{ last_snapshot_date: string }>(
+      connection,
+      `SELECT MAX(_snapshot_date)::VARCHAR as last_snapshot_date
+       FROM enterprises
+       WHERE enterprise_number = '${enterpriseNumber}'`
+    )
+    lastSnapshotDate = lastSnapshot[0]?.last_snapshot_date || null
+  }
 
   // Fetch all related data in parallel
   const [denominations, addresses, activities, contacts, establishments] = await Promise.all([
@@ -298,12 +319,17 @@ export async function fetchEnterpriseDetail(
     snapshotDate: enterprise._snapshot_date,
     extractNumber: enterprise._extract_number,
 
+    // Cessation/deletion tracking
+    isCurrent: enterprise._is_current,
+    deletedAtExtract: enterprise._deleted_at_extract,
+    lastSnapshotDate: lastSnapshotDate,
+
     denominations: await Promise.all(
       denominations.map(async (d) => ({
         language: d.language,
         languageDescription: getLanguageAbbreviation(d.language),
         typeCode: d.denomination_type,
-        typeDescription: await getDenominationTypeDescription(d.denomination_type),
+        typeDescription: await getDenominationTypeDescription(d.denomination_type, language),
         denomination: d.denomination,
       }))
     ),

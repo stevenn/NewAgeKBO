@@ -12,6 +12,7 @@ export interface EnterpriseSearchResult {
   startDate: string | null
   address: string | null
   municipality: string | null
+  isCurrent: boolean
 }
 
 export async function GET(request: Request) {
@@ -26,6 +27,12 @@ export async function GET(request: Request) {
     const searchType = searchParams.get('type') || 'all' // all, number, name, nace
     const limit = Math.min(Math.max(parseInt(searchParams.get('limit') || '50') || 50, 1), 200)
     const offset = Math.max(parseInt(searchParams.get('offset') || '0') || 0, 0)
+    const languageParam = searchParams.get('language')
+
+    // Validate language parameter (default to NL)
+    const language = ['NL', 'FR', 'DE'].includes(languageParam?.toUpperCase() || '')
+      ? (languageParam?.toUpperCase() as 'NL' | 'FR' | 'DE')
+      : 'NL'
 
     if (!query && searchType !== 'all') {
       return NextResponse.json({ results: [], total: 0 })
@@ -51,7 +58,8 @@ export async function GET(request: Request) {
             e.status,
             e.start_date,
             a.street_nl as address,
-            a.municipality_nl as municipality
+            a.municipality_nl as municipality,
+            e._is_current
           FROM enterprises_current e
           LEFT JOIN addresses_current a ON e.enterprise_number = a.entity_number
             AND a.type_of_address = 'REGO'
@@ -75,7 +83,8 @@ export async function GET(request: Request) {
             e.status,
             e.start_date,
             a.street_nl as address,
-            a.municipality_nl as municipality
+            a.municipality_nl as municipality,
+            e._is_current
           FROM enterprises_current e
           LEFT JOIN denominations_current d ON e.enterprise_number = d.entity_number
           LEFT JOIN addresses_current a ON e.enterprise_number = a.entity_number
@@ -101,7 +110,8 @@ export async function GET(request: Request) {
             e.status,
             e.start_date,
             a.street_nl as address,
-            a.municipality_nl as municipality
+            a.municipality_nl as municipality,
+            e._is_current
           FROM enterprises_current e
           INNER JOIN activities_current act ON e.enterprise_number = act.entity_number
           LEFT JOIN addresses_current a ON e.enterprise_number = a.entity_number
@@ -129,7 +139,8 @@ export async function GET(request: Request) {
               e.status,
               e.start_date,
               a.street_nl as address,
-              a.municipality_nl as municipality
+              a.municipality_nl as municipality,
+              e._is_current
             FROM enterprises_current e
             LEFT JOIN denominations_current d ON e.enterprise_number = d.entity_number
             LEFT JOIN addresses_current a ON e.enterprise_number = a.entity_number
@@ -160,7 +171,8 @@ export async function GET(request: Request) {
               e.status,
               e.start_date,
               a.street_nl as address,
-              a.municipality_nl as municipality
+              a.municipality_nl as municipality,
+              e._is_current
             FROM enterprises_current e
             LEFT JOIN addresses_current a ON e.enterprise_number = a.entity_number
               AND a.type_of_address = 'REGO'
@@ -184,6 +196,7 @@ export async function GET(request: Request) {
           start_date: string | null
           address: string | null
           municipality: string | null
+          _is_current: boolean
         }>(connection, searchSql),
         executeQuery<{ count: number }>(connection, countSql),
       ])
@@ -196,11 +209,12 @@ export async function GET(request: Request) {
           enterpriseNumber: row.enterprise_number,
           primaryName: row.primary_name || 'Unknown',
           juridicalForm: row.juridical_form,
-          juridicalFormDescription: await getJuridicalFormDescription(row.juridical_form),
+          juridicalFormDescription: await getJuridicalFormDescription(row.juridical_form, language),
           status: row.status,
           startDate: row.start_date,
           address: row.address,
           municipality: row.municipality,
+          isCurrent: row._is_current,
         }))
       )
 

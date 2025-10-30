@@ -16,6 +16,11 @@ export interface EnterpriseDetail {
   snapshotDate: string
   extractNumber: number
 
+  // Cessation/deletion tracking
+  isCurrent: boolean
+  deletedAtExtract: number | null
+  lastSnapshotDate: string | null
+
   denominations: Denomination[]
   addresses: Address[]
   activities: Activity[]
@@ -79,10 +84,16 @@ export async function GET(
 
     const { number } = await params
 
-    // Parse query parameters for temporal navigation
+    // Parse query parameters for temporal navigation and language
     const { searchParams } = new URL(request.url)
     const snapshotDate = searchParams.get('snapshot_date')
     const extractNumber = searchParams.get('extract_number')
+    const languageParam = searchParams.get('language')
+
+    // Validate language parameter (default to NL)
+    const language = ['NL', 'FR', 'DE'].includes(languageParam?.toUpperCase() || '')
+      ? (languageParam?.toUpperCase() as 'NL' | 'FR' | 'DE')
+      : 'NL'
 
     // Build temporal filter object
     const filter = extractNumber
@@ -99,7 +110,7 @@ export async function GET(
     try {
       // Use shared helper function to fetch enterprise details
       const { fetchEnterpriseDetail } = await import('@/lib/motherduck/enterprise-detail')
-      const detail = await fetchEnterpriseDetail(connection, number, filter)
+      const detail = await fetchEnterpriseDetail(connection, number, filter, language)
 
       if (!detail) {
         return NextResponse.json({ error: 'Enterprise not found' }, { status: 404 })

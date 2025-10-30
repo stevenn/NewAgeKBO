@@ -1,8 +1,47 @@
-import { getDatabaseStats } from '@/lib/motherduck/stats'
+'use client'
+
+import { useState, useEffect } from 'react'
+import { useLanguage } from '@/lib/contexts/language-context'
+import type { DatabaseStats as DatabaseStatsType } from '@/lib/motherduck/stats'
 import { JuridicalFormsChart } from './juridical-forms-chart'
 
-export async function DatabaseStats() {
-  const stats = await getDatabaseStats()
+export function DatabaseStats() {
+  const { language } = useLanguage()
+  const [stats, setStats] = useState<DatabaseStatsType | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      setLoading(true)
+      setError(null)
+
+      try {
+        const res = await fetch(`/api/motherduck/stats?language=${language}`)
+        if (!res.ok) throw new Error('Failed to fetch stats')
+        const data = await res.json()
+        setStats(data)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load stats')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchStats()
+  }, [language])
+
+  if (loading || !stats) {
+    return <LoadingStats />
+  }
+
+  if (error) {
+    return (
+      <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+        <p className="text-red-800">{error}</p>
+      </div>
+    )
+  }
 
   // Total current records across all tables (enterprises, establishments, activities, addresses, denominations, contacts)
   // Note: Multiple extracts may be current simultaneously during incremental updates
@@ -124,5 +163,33 @@ export async function DatabaseStats() {
         </div>
       </div>
     </>
+  )
+}
+
+function LoadingStats() {
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="rounded-lg border bg-white p-6 animate-pulse">
+            <div className="h-4 bg-gray-200 rounded w-1/2 mb-4"></div>
+            <div className="h-8 bg-gray-200 rounded w-3/4 mb-2"></div>
+            <div className="h-3 bg-gray-200 rounded w-1/3"></div>
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded-lg border bg-white p-6 animate-pulse">
+        <div className="h-6 bg-gray-200 rounded w-1/4 mb-4"></div>
+        <div className="space-y-3">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="flex justify-between">
+              <div className="h-4 bg-gray-200 rounded w-1/3"></div>
+              <div className="h-4 bg-gray-200 rounded w-1/4"></div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   )
 }

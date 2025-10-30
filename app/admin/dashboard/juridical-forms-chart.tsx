@@ -34,7 +34,7 @@ export function JuridicalFormsChart({ forms }: JuridicalFormsChartProps) {
               <div className="flex justify-between items-baseline text-sm">
                 <div className="flex items-baseline gap-2">
                   <span className="text-gray-500 font-mono text-xs">#{index + 1}</span>
-                  <span className="font-medium">{form.description_nl || form.code}</span>
+                  <span className="font-medium">{form.description || form.code}</span>
                   {!isNaturalPerson && (
                     <span className="text-gray-400 text-xs">({form.code})</span>
                   )}

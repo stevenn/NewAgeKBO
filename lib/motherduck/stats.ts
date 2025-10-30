@@ -1,10 +1,13 @@
 import { connectMotherduck, closeMotherduck, executeQuery } from './index'
 import { generateProvinceSQLCase } from '../config/provinces'
+import type { Language } from '../types/codes'
 
 export interface JuridicalFormStat {
   code: string
+  description: string | null  // Selected language description
   description_nl: string | null
   description_fr: string | null
+  description_de: string | null
   count: number
 }
 
@@ -42,7 +45,7 @@ export interface DatabaseStats {
   provinceDistribution: ProvinceStat[]
 }
 
-export async function getDatabaseStats(): Promise<DatabaseStats> {
+export async function getDatabaseStats(language: Language = 'NL'): Promise<DatabaseStats> {
   const connection = await connectMotherduck()
 
   try {
@@ -115,6 +118,10 @@ export async function getDatabaseStats(): Promise<DatabaseStats> {
           WHEN e.juridical_form IS NULL THEN 'Personne physique (pas de forme juridique)'
           ELSE MAX(c_fr.description)
         END as description_fr,
+        CASE
+          WHEN e.juridical_form IS NULL THEN 'Natürliche Person (keine Rechtsform)'
+          ELSE MAX(c_de.description)
+        END as description_de,
         COUNT(*) as count
       FROM enterprises e
       LEFT JOIN codes c_nl ON c_nl.category = 'JuridicalForm'
@@ -123,6 +130,9 @@ export async function getDatabaseStats(): Promise<DatabaseStats> {
       LEFT JOIN codes c_fr ON c_fr.category = 'JuridicalForm'
         AND c_fr.code = e.juridical_form
         AND c_fr.language = 'FR'
+      LEFT JOIN codes c_de ON c_de.category = 'JuridicalForm'
+        AND c_de.code = e.juridical_form
+        AND c_de.language = 'DE'
       WHERE e._is_current = true
       GROUP BY e.juridical_form
       ORDER BY count DESC`
@@ -209,6 +219,10 @@ export async function getDatabaseStats(): Promise<DatabaseStats> {
         all: juridicalFormsAll.map((item) => ({
           ...item,
           count: Number(item.count),
+          // Set description based on selected language
+          description: language === 'FR' ? item.description_fr
+                     : language === 'DE' ? item.description_de
+                     : item.description_nl,
         })),
       },
       languageDistribution: languageStats,
