@@ -3,8 +3,10 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import type { EnterpriseSearchResult } from '@/app/api/enterprises/search/route'
+import { useLanguage } from '@/lib/contexts/language-context'
 
 export default function BrowsePage() {
+  const { language } = useLanguage()
   const [searchQuery, setSearchQuery] = useState('')
   const [searchType, setSearchType] = useState<'all' | 'number' | 'name' | 'nace'>('all')
   const [results, setResults] = useState<EnterpriseSearchResult[]>([])
@@ -25,6 +27,7 @@ export default function BrowsePage() {
         type: searchType,
         limit: limit.toString(),
         offset: offset.toString(),
+        language: language,
       })
 
       const res = await fetch(`/api/enterprises/search?${params}`)
@@ -51,10 +54,10 @@ export default function BrowsePage() {
     executeSearch(1)
   }
 
-  // Load initial data on mount
+  // Load initial data on mount and when language changes
   useEffect(() => {
     executeSearch(1)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [language]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const totalPages = Math.ceil(total / limit)
 
@@ -164,12 +167,22 @@ export default function BrowsePage() {
                 </thead>
                 <tbody className="divide-y">
                   {results.map((enterprise) => (
-                    <tr key={enterprise.enterpriseNumber} className="hover:bg-gray-50">
+                    <tr
+                      key={enterprise.enterpriseNumber}
+                      className={`hover:bg-gray-50 ${!enterprise.isCurrent ? 'opacity-60' : ''}`}
+                    >
                       <td className="px-4 py-3 text-sm font-mono w-40">
                         {enterprise.enterpriseNumber}
                       </td>
                       <td className="px-4 py-3 text-sm">
-                        {enterprise.primaryName}
+                        <div className="flex items-center gap-2">
+                          <span>{enterprise.primaryName}</span>
+                          {!enterprise.isCurrent && (
+                            <span className="inline-block px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">
+                              Ceased
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-sm w-64">
                         {enterprise.juridicalFormDescription || '-'}
@@ -179,10 +192,12 @@ export default function BrowsePage() {
                           className={`inline-block px-2 py-1 rounded text-xs font-medium ${
                             enterprise.status === 'AC'
                               ? 'bg-green-100 text-green-800'
+                              : enterprise.status === 'ST'
+                              ? 'bg-red-100 text-red-800'
                               : 'bg-gray-100 text-gray-800'
                           }`}
                         >
-                          {enterprise.status}
+                          {enterprise.status === 'AC' ? 'Active' : enterprise.status === 'ST' ? 'Ceased' : enterprise.status}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-sm w-40">

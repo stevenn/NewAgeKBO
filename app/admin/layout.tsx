@@ -1,5 +1,6 @@
 import { UserButton } from '@clerk/nextjs'
 import Link from 'next/link'
+import { LanguageSelector } from '@/components/language-selector'
 
 export default function AdminLayout({
   children,
@@ -12,8 +13,13 @@ export default function AdminLayout({
       {/* Sidebar */}
       <aside className="w-64 border-r bg-gray-50 p-6">
         <div className="mb-8">
-          <h1 className="text-xl font-bold">CBE Admin</h1>
-          <p className="text-sm text-gray-600">Data Platform for the New Age</p>
+          <h1 className="text-xl font-bold">KBO / BCE / CBE</h1>
+          <p className="text-sm text-gray-600">For the Modern Age</p>
+        </div>
+
+        {/* Language Selector */}
+        <div className="mb-6">
+          <LanguageSelector />
         </div>
 
         <nav className="space-y-2">

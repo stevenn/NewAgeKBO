@@ -7,7 +7,7 @@
 // Note: Old duckdb import commented out - not used in production web flow
 // Only needed for CLI scripts which should be updated to use @duckdb/node-api
 // import * as duckdb from 'duckdb'
-import { join } from 'path'
+// import { join } from 'path'
 import { ImportJobType } from '../types/import-job'
 
 /**
@@ -23,11 +23,12 @@ export interface Metadata {
 
 /**
  * Raw meta.csv record (Variable/Value pairs)
+ * Used in commented-out parseMetadataWithDuckDB function
  */
-interface MetaRecord {
-  Variable?: string
-  Value?: string
-}
+// interface MetaRecord {
+//   Variable?: string
+//   Value?: string
+// }
 
 /**
  * Parse meta.csv using DuckDB to extract snapshot date and extract number
