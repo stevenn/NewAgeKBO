@@ -118,7 +118,7 @@ async function applyDeletes(
     const records = parse(content.toString(), {
       columns: true,
       skip_empty_lines: true
-    })
+    }) as Record<string, string>[]
 
     if (records.length === 0) {
       console.log(`   ℹ️  ${dbTableName}: No deletes`)
@@ -169,7 +169,7 @@ async function applyInserts(
     const records = parse(content.toString(), {
       columns: true,
       skip_empty_lines: true
-    })
+    }) as Record<string, string>[]
 
     if (records.length === 0) {
       console.log(`   ℹ️  ${dbTableName}: No inserts`)
@@ -196,7 +196,7 @@ async function applyInserts(
     const enterpriseNames = new Map<string, Record<string, string>>()
     if (dbTableName === 'enterprises') {
       const enterpriseNumbers = uniqueRecords.map((r: Record<string, string>) => `'${r['EnterpriseNumber']}'`).join(',')
-      const existingRecords = await executeQuery(db, `
+      const existingRecords = await executeQuery<Record<string, string>>(db, `
         SELECT enterprise_number, primary_name, primary_name_language,
                primary_name_nl, primary_name_fr, primary_name_de
         FROM enterprises
@@ -382,7 +382,7 @@ async function resolvePrimaryNames(
   await executeStatement(db, sql)
 
   // Count how many were updated
-  const result = await executeQuery(db, `
+  const result = await executeQuery<{ count: number }>(db, `
     SELECT COUNT(*) as count
     FROM enterprises
     WHERE _snapshot_date = '${snapshotDate}'
