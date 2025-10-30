@@ -4,7 +4,9 @@
  * Handles parsing of meta.csv files from KBO Open Data extracts
  */
 
-import * as duckdb from 'duckdb'
+// Note: Old duckdb import commented out - not used in production web flow
+// Only needed for CLI scripts which should be updated to use @duckdb/node-api
+// import * as duckdb from 'duckdb'
 import { join } from 'path'
 import { ImportJobType } from '../types/import-job'
 
@@ -30,12 +32,17 @@ interface MetaRecord {
 /**
  * Parse meta.csv using DuckDB to extract snapshot date and extract number
  *
+ * NOTE: This function uses the old 'duckdb' package and is ONLY for CLI scripts.
+ * The production web import uses parseMetadataFromContent() instead.
+ * This function is commented out to avoid build errors - CLI scripts need updating.
+ *
  * @param db DuckDB database instance
  * @param dataPath Path to directory containing meta.csv
  * @returns Parsed metadata with converted date format
  */
+/*
 export async function parseMetadataWithDuckDB(
-  db: duckdb.Database,
+  db: any, // duckdb.Database - old package not used in production
   dataPath: string
 ): Promise<Metadata> {
   const metaPath = join(dataPath, 'meta.csv')
@@ -86,6 +93,7 @@ export async function parseMetadataWithDuckDB(
     extractTimestamp: metadata.ExtractTimestamp
   }
 }
+*/
 
 /**
  * Parse meta.csv from filesystem (for non-DuckDB contexts like ZIP processing)
