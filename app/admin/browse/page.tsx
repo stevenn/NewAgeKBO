@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import type { EnterpriseSearchResult } from '@/app/api/enterprises/search/route'
 import { useLanguage } from '@/lib/contexts/language-context'
 
 export default function BrowsePage() {
-  const { language } = useLanguage()
+  const { language, isInitialized } = useLanguage()
   const [searchQuery, setSearchQuery] = useState('')
   const [searchType, setSearchType] = useState<'all' | 'number' | 'name' | 'nace'>('all')
   const [results, setResults] = useState<EnterpriseSearchResult[]>([])
@@ -15,6 +15,8 @@ export default function BrowsePage() {
   const [error, setError] = useState<string | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
   const limit = 25
+  const hasFetchedRef = useRef(false)
+  const lastLanguageRef = useRef<string | null>(null)
 
   const executeSearch = async (page: number = 1) => {
     setLoading(true)
@@ -56,8 +58,20 @@ export default function BrowsePage() {
 
   // Load initial data on mount and when language changes
   useEffect(() => {
+    if (!isInitialized) return
+
+    // Reset hasFetched when language changes
+    if (lastLanguageRef.current !== language) {
+      hasFetchedRef.current = false
+      lastLanguageRef.current = language
+    }
+
+    // Prevent double-fetch in React Strict Mode
+    if (hasFetchedRef.current) return
+    hasFetchedRef.current = true
+
     executeSearch(1)
-  }, [language]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [language, isInitialized]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const totalPages = Math.ceil(total / limit)
 

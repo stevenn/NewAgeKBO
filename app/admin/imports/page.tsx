@@ -38,6 +38,9 @@ export default function ImportsPage() {
   // Expanded jobs state
   const [expandedJobIds, setExpandedJobIds] = useState<Set<string>>(new Set())
 
+  // Prevent double-fetch in React Strict Mode
+  const hasFetchedRef = React.useRef(false)
+
   // Available files state
   const [availableFiles, setAvailableFiles] = useState<AvailableFile[]>([])
   const [filesLoading, setFilesLoading] = useState(false)
@@ -102,6 +105,10 @@ export default function ImportsPage() {
   }
 
   useEffect(() => {
+    // Prevent double-fetch in React Strict Mode
+    if (hasFetchedRef.current) return
+    hasFetchedRef.current = true
+
     fetchJobs(1)
   }, [])
 

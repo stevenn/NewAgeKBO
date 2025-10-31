@@ -1,17 +1,31 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useLanguage } from '@/lib/contexts/language-context'
 import type { DatabaseStats as DatabaseStatsType } from '@/lib/motherduck/stats'
 import { JuridicalFormsChart } from './juridical-forms-chart'
 
 export function DatabaseStats() {
-  const { language } = useLanguage()
+  const { language, isInitialized } = useLanguage()
   const [stats, setStats] = useState<DatabaseStatsType | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const hasFetchedRef = useRef(false)
+  const lastLanguageRef = useRef<string | null>(null)
 
   useEffect(() => {
+    if (!isInitialized) return
+
+    // Reset hasFetched when language changes
+    if (lastLanguageRef.current !== language) {
+      hasFetchedRef.current = false
+      lastLanguageRef.current = language
+    }
+
+    // Prevent double-fetch in React Strict Mode
+    if (hasFetchedRef.current) return
+    hasFetchedRef.current = true
+
     const fetchStats = async () => {
       setLoading(true)
       setError(null)
@@ -29,7 +43,7 @@ export function DatabaseStats() {
     }
 
     fetchStats()
-  }, [language])
+  }, [language, isInitialized])
 
   if (loading || !stats) {
     return <LoadingStats />

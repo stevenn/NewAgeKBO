@@ -6,6 +6,7 @@ import type { Language } from '@/lib/types/codes'
 interface LanguageContextType {
   language: Language
   setLanguage: (lang: Language) => void
+  isInitialized: boolean
 }
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined)
@@ -15,6 +16,7 @@ const LANGUAGE_STORAGE_KEY = 'kbo-language-preference'
 export function LanguageProvider({ children }: { children: ReactNode }) {
   // Default to NL, will be updated from localStorage on mount
   const [language, setLanguageState] = useState<Language>('NL')
+  const [isInitialized, setIsInitialized] = useState(false)
 
   // Load language preference from localStorage on mount
   useEffect(() => {
@@ -22,6 +24,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     if (stored && ['NL', 'FR', 'DE'].includes(stored)) {
       setLanguageState(stored)
     }
+    setIsInitialized(true)
   }, [])
 
   // Wrapper to persist language changes
@@ -31,7 +34,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <LanguageContext.Provider value={{ language, setLanguage }}>
+    <LanguageContext.Provider value={{ language, setLanguage, isInitialized }}>
       {children}
     </LanguageContext.Provider>
   )

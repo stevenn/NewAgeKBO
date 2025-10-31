@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import Link from 'next/link'
 import { useParams, useSearchParams } from 'next/navigation'
 import type { EnterpriseDetail } from '@/app/api/enterprises/[number]/route'
@@ -11,7 +11,7 @@ import { useLanguage } from '@/lib/contexts/language-context'
 export default function EnterpriseDetailPage() {
   const params = useParams()
   const searchParams = useSearchParams()
-  const { language } = useLanguage()
+  const { language, isInitialized } = useLanguage()
   const number = params.number as string
   const fromExtract = searchParams.get('from_extract')
 
@@ -21,6 +21,9 @@ export default function EnterpriseDetailPage() {
   const [selectedSnapshot, setSelectedSnapshot] = useState<Snapshot | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const hasFetchedRef = useRef(false)
+  const lastLanguageRef = useRef<string | null>(null)
+  const lastSnapshotRef = useRef<string | null>(null)
 
   // Compute comparison between current and previous snapshot
   const comparison = useMemo(() => {
@@ -67,7 +70,21 @@ export default function EnterpriseDetailPage() {
 
   // Fetch enterprise details when selected snapshot changes
   useEffect(() => {
-    if (!selectedSnapshot || !snapshots.length) return
+    if (!isInitialized || !selectedSnapshot || !snapshots.length) return
+
+    // Create a unique key for this fetch combination
+    const fetchKey = `${language}-${selectedSnapshot.snapshotDate}-${selectedSnapshot.extractNumber}`
+
+    // Reset hasFetched when any dependency changes
+    if (lastLanguageRef.current !== language || lastSnapshotRef.current !== fetchKey) {
+      hasFetchedRef.current = false
+      lastLanguageRef.current = language
+      lastSnapshotRef.current = fetchKey
+    }
+
+    // Prevent double-fetch in React Strict Mode
+    if (hasFetchedRef.current) return
+    hasFetchedRef.current = true
 
     const fetchDetailAndPrevious = async () => {
       setLoading(true)
@@ -126,7 +143,7 @@ export default function EnterpriseDetailPage() {
 
     fetchDetailAndPrevious()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [number, selectedSnapshot, snapshots, language])
+  }, [number, selectedSnapshot, snapshots, language, isInitialized])
 
   if (error) {
     return (
