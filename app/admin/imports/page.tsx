@@ -103,7 +103,6 @@ export default function ImportsPage() {
 
   useEffect(() => {
     fetchJobs(1)
-    fetchAvailableFiles()
   }, [])
 
   const handlePageChange = (newPage: number) => {
