@@ -41,8 +41,10 @@ export default function ImportProgressPage({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [processing, setProcessing] = useState(false)
+  const [processingError, setProcessingError] = useState<string | null>(null)
   const [autoProcess, setAutoProcess] = useState(false)
   const [finalizing, setFinalizing] = useState(false)
+  const [finalizeError, setFinalizeError] = useState<string | null>(null)
   const [finalizeResult, setFinalizeResult] = useState<{
     success: boolean
     names_resolved: number
@@ -110,6 +112,7 @@ export default function ImportProgressPage({
 
   const handleProcessBatch = async () => {
     setProcessing(true)
+    setProcessingError(null)
     try {
       const response = await fetch(
         `/api/admin/imports/${resolvedParams.jobId}/process-batch`,
@@ -119,7 +122,7 @@ export default function ImportProgressPage({
         throw new Error('Failed to process batch')
       }
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to process batch')
+      setProcessingError(err instanceof Error ? err.message : 'Failed to process batch')
     } finally {
       setProcessing(false)
     }
@@ -131,6 +134,7 @@ export default function ImportProgressPage({
     }
 
     setFinalizing(true)
+    setFinalizeError(null)
     try {
       const response = await fetch(
         `/api/admin/imports/${resolvedParams.jobId}/finalize`,
@@ -142,7 +146,7 @@ export default function ImportProgressPage({
       const data = await response.json()
       setFinalizeResult(data)
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to finalize import')
+      setFinalizeError(err instanceof Error ? err.message : 'Failed to finalize import')
     } finally {
       setFinalizing(false)
     }
@@ -305,6 +309,11 @@ export default function ImportProgressPage({
               ? '⚡ Auto-processing enabled - batches will process automatically'
               : 'Process batches one at a time, or enable auto-processing to complete all batches'}
           </p>
+          {processingError && (
+            <div className="mt-4 bg-red-50 border border-red-200 rounded p-3 text-sm text-red-700">
+              <span className="font-medium">Error:</span> {processingError}
+            </div>
+          )}
         </div>
       )}
 
@@ -340,6 +349,11 @@ export default function ImportProgressPage({
               </>
             )}
           </button>
+          {finalizeError && (
+            <div className="mt-4 bg-red-50 border border-red-200 rounded p-3 text-sm text-red-700">
+              <span className="font-medium">Error:</span> {finalizeError}
+            </div>
+          )}
         </div>
       )}
 

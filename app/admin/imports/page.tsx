@@ -52,6 +52,7 @@ export default function ImportsPage() {
   const [filesLoading, setFilesLoading] = useState(false)
   const [filesError, setFilesError] = useState<string | null>(null)
   const [importingFiles, setImportingFiles] = useState<Set<number>>(new Set())
+  const [fileErrors, setFileErrors] = useState<Map<number, string>>(new Map())
   const [showImportedFiles, setShowImportedFiles] = useState(false)
 
   // Batched import state
@@ -170,8 +171,13 @@ export default function ImportsPage() {
   }
 
   const handleBatchedImportFromUrl = async (file: AvailableFile) => {
-    // Add to importing set
+    // Add to importing set and clear any previous errors
     setImportingFiles(prev => new Set(prev).add(file.extract_number))
+    setFileErrors(prev => {
+      const newMap = new Map(prev)
+      newMap.delete(file.extract_number)
+      return newMap
+    })
 
     try {
       const response = await fetch('/api/admin/imports/prepare?workerType=vercel', {
@@ -190,18 +196,15 @@ export default function ImportsPage() {
         throw new Error(data.error || data.details || 'Failed to prepare batched import')
       }
 
-      // Show success and navigate to progress page
-      if (confirm(`Import prepared successfully!\n\n• Job ID: ${data.job_id}\n• Extract: #${data.extract_number}\n• Total Batches: ${data.total_batches}\n\nGo to progress page now?`)) {
-        window.location.href = `/admin/imports/${data.job_id}/progress`
-      } else {
-        // Refresh lists
-        setTimeout(() => {
-          fetchJobs(currentPage)
-          fetchAvailableFiles()
-        }, 1000)
-      }
+      // Navigate directly to progress page
+      router.push(`/admin/imports/${data.job_id}/progress`)
     } catch (err) {
-      alert(`Failed to prepare batched import for ${file.filename}: ${err instanceof Error ? err.message : 'Unknown error'}`)
+      // Set error state for this file
+      setFileErrors(prev => {
+        const newMap = new Map(prev)
+        newMap.set(file.extract_number, err instanceof Error ? err.message : 'Unknown error')
+        return newMap
+      })
     } finally {
       // Remove from importing set
       setImportingFiles(prev => {
@@ -213,8 +216,13 @@ export default function ImportsPage() {
   }
 
   const handleImportFile = async (file: AvailableFile) => {
-    // Add to importing set
+    // Add to importing set and clear any previous errors
     setImportingFiles(prev => new Set(prev).add(file.extract_number))
+    setFileErrors(prev => {
+      const newMap = new Map(prev)
+      newMap.delete(file.extract_number)
+      return newMap
+    })
 
     try {
       const response = await fetch('/api/import/daily-update', {
@@ -239,7 +247,12 @@ export default function ImportsPage() {
         fetchAvailableFiles()
       }, 1000)
     } catch (err) {
-      alert(`Failed to import ${file.filename}: ${err instanceof Error ? err.message : 'Unknown error'}`)
+      // Set error state for this file
+      setFileErrors(prev => {
+        const newMap = new Map(prev)
+        newMap.set(file.extract_number, err instanceof Error ? err.message : 'Unknown error')
+        return newMap
+      })
     } finally {
       // Remove from importing set
       setImportingFiles(prev => {
@@ -425,36 +438,36 @@ export default function ImportsPage() {
           const notImportedFiles = availableFiles.filter(f => !f.imported)
           const importedFiles = availableFiles.filter(f => f.imported)
 
-          const FileRow = ({ file }: { file: AvailableFile }) => (
-            <div
-              key={file.extract_number}
-              className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50"
-            >
-              <div className="flex-1">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="font-mono text-sm font-medium">
-                    #{file.extract_number}
-                  </span>
-                  <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
-                    file.file_type === 'full'
-                      ? 'bg-orange-100 text-orange-800'
-                      : 'bg-blue-100 text-blue-800'
-                  }`}>
-                    {file.file_type === 'full' ? 'Full' : 'Update'}
-                  </span>
-                  {file.imported && (
-                    <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
-                      ✓ Imported
-                    </span>
-                  )}
-                </div>
-                <p className="text-sm text-gray-600">
-                  {file.snapshot_date}
-                </p>
-                <p className="text-xs text-gray-500 font-mono mt-1">
-                  {file.filename}
-                </p>
-              </div>
+          const FileRow = ({ file }: { file: AvailableFile }) => {
+            const fileError = fileErrors.get(file.extract_number)
+            return (
+              <div key={file.extract_number} className="border rounded-lg hover:bg-gray-50">
+                <div className="flex items-center justify-between p-4">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-mono text-sm font-medium">
+                        #{file.extract_number}
+                      </span>
+                      <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
+                        file.file_type === 'full'
+                          ? 'bg-orange-100 text-orange-800'
+                          : 'bg-blue-100 text-blue-800'
+                      }`}>
+                        {file.file_type === 'full' ? 'Full' : 'Update'}
+                      </span>
+                      {file.imported && (
+                        <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                          ✓ Imported
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm text-gray-600">
+                      {file.snapshot_date}
+                    </p>
+                    <p className="text-xs text-gray-500 font-mono mt-1">
+                      {file.filename}
+                    </p>
+                  </div>
               <div className="ml-4 flex gap-2">
                 <button
                   onClick={() => handleImportFile(file)}
@@ -493,9 +506,18 @@ export default function ImportsPage() {
                     Batched Import
                   </button>
                 )}
+                  </div>
+                </div>
+                {fileError && (
+                  <div className="px-4 pb-4">
+                    <div className="bg-red-50 border border-red-200 rounded p-3 text-sm text-red-700">
+                      <span className="font-medium">Error:</span> {fileError}
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
-          )
+            )
+          }
 
           return (
             <div className="space-y-4">
