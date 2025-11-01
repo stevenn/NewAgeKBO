@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { ExpandableJobDetails } from './components/ExpandableJobDetails'
 
 interface ImportJob {
@@ -13,6 +14,7 @@ interface ImportJob {
   snapshotDate: string
   recordsProcessed: number
   errorMessage: string | null
+  workerType: string
 }
 
 interface AvailableFile {
@@ -25,6 +27,7 @@ interface AvailableFile {
 }
 
 export default function ImportsPage() {
+  const router = useRouter()
   const [jobs, setJobs] = useState<ImportJob[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -38,6 +41,9 @@ export default function ImportsPage() {
   // Expanded jobs state
   const [expandedJobIds, setExpandedJobIds] = useState<Set<string>>(new Set())
 
+  // Menu state for action dropdowns
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null)
+
   // Prevent double-fetch in React Strict Mode
   const hasFetchedRef = React.useRef(false)
 
@@ -47,6 +53,16 @@ export default function ImportsPage() {
   const [filesError, setFilesError] = useState<string | null>(null)
   const [importingFiles, setImportingFiles] = useState<Set<number>>(new Set())
   const [showImportedFiles, setShowImportedFiles] = useState(false)
+
+  // Batched import state
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [uploadSuccess, setUploadSuccess] = useState<{
+    jobId: string
+    extractNumber: number
+    totalBatches: number
+  } | null>(null)
 
   const toggleJobExpansion = (jobId: string) => {
     setExpandedJobIds(prev => {
@@ -114,6 +130,86 @@ export default function ImportsPage() {
 
   const handlePageChange = (newPage: number) => {
     fetchJobs(newPage)
+  }
+
+  const handleBatchedImport = async () => {
+    if (!uploadFile) return
+
+    setUploading(true)
+    setUploadError(null)
+    setUploadSuccess(null)
+
+    try {
+      const formData = new FormData()
+      formData.append('file', uploadFile)
+
+      const response = await fetch('/api/admin/imports/prepare?workerType=vercel', {
+        method: 'POST',
+        body: formData,
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to prepare import')
+      }
+
+      setUploadSuccess({
+        jobId: data.job_id,
+        extractNumber: data.extract_number,
+        totalBatches: data.total_batches,
+      })
+
+      // Refresh import jobs list
+      setTimeout(() => fetchJobs(currentPage), 1000)
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'Unknown error')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const handleBatchedImportFromUrl = async (file: AvailableFile) => {
+    // Add to importing set
+    setImportingFiles(prev => new Set(prev).add(file.extract_number))
+
+    try {
+      const response = await fetch('/api/admin/imports/prepare?workerType=vercel', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          url: file.url,
+        }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || data.details || 'Failed to prepare batched import')
+      }
+
+      // Show success and navigate to progress page
+      if (confirm(`Import prepared successfully!\n\n• Job ID: ${data.job_id}\n• Extract: #${data.extract_number}\n• Total Batches: ${data.total_batches}\n\nGo to progress page now?`)) {
+        window.location.href = `/admin/imports/${data.job_id}/progress`
+      } else {
+        // Refresh lists
+        setTimeout(() => {
+          fetchJobs(currentPage)
+          fetchAvailableFiles()
+        }, 1000)
+      }
+    } catch (err) {
+      alert(`Failed to prepare batched import for ${file.filename}: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    } finally {
+      // Remove from importing set
+      setImportingFiles(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(file.extract_number)
+        return newSet
+      })
+    }
   }
 
   const handleImportFile = async (file: AvailableFile) => {
@@ -196,6 +292,91 @@ export default function ImportsPage() {
         <h1 className="text-3xl font-bold">Import Management</h1>
       </div>
 
+      {/* Manual Batched Import Section */}
+      <div className="bg-white rounded-lg border p-6 mb-6">
+        <div className="mb-4">
+          <h2 className="text-xl font-semibold">Manual Import Upload</h2>
+          <p className="text-gray-600 text-sm mt-1">
+            Upload a KBO update ZIP file for batched processing (avoids timeouts)
+          </p>
+        </div>
+
+        <div className="space-y-4">
+          {/* File Upload */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Select ZIP File
+            </label>
+            <input
+              type="file"
+              accept=".zip"
+              onChange={(e) => {
+                setUploadFile(e.target.files?.[0] || null)
+                setUploadError(null)
+                setUploadSuccess(null)
+              }}
+              disabled={uploading}
+              className="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-gray-50 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+            />
+            {uploadFile && (
+              <p className="mt-2 text-sm text-gray-600">
+                Selected: {uploadFile.name} ({Math.round(uploadFile.size / 1024)}KB)
+              </p>
+            )}
+          </div>
+
+          {/* Upload Button */}
+          <button
+            onClick={handleBatchedImport}
+            disabled={!uploadFile || uploading}
+            className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {uploading ? (
+              <>
+                <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Preparing Import...
+              </>
+            ) : (
+              <>
+                <svg className="w-5 h-5" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+                  <path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+                Prepare Batched Import
+              </>
+            )}
+          </button>
+
+          {/* Error Message */}
+          {uploadError && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <p className="text-red-800 font-medium">Upload Failed</p>
+              <p className="text-red-700 text-sm mt-1">{uploadError}</p>
+            </div>
+          )}
+
+          {/* Success Message */}
+          {uploadSuccess && (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              <p className="text-green-800 font-medium">Import Prepared Successfully!</p>
+              <div className="text-sm text-green-700 mt-2 space-y-1">
+                <p>• Job ID: <span className="font-mono">{uploadSuccess.jobId}</span></p>
+                <p>• Extract: #{uploadSuccess.extractNumber}</p>
+                <p>• Total Batches: {uploadSuccess.totalBatches}</p>
+              </div>
+              <a
+                href={`/admin/imports/${uploadSuccess.jobId}/progress`}
+                className="inline-block mt-3 text-green-700 hover:text-green-900 font-medium text-sm underline"
+              >
+                → View Progress & Process Batches
+              </a>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Available Files List */}
       <div className="bg-white rounded-lg border p-6 mb-6">
         <div className="flex justify-between items-center mb-4">
@@ -274,30 +455,45 @@ export default function ImportsPage() {
                   {file.filename}
                 </p>
               </div>
-              <button
-                onClick={() => handleImportFile(file)}
-                disabled={file.imported || importingFiles.has(file.extract_number)}
-                className="ml-4 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm flex items-center gap-2"
-              >
-                {importingFiles.has(file.extract_number) ? (
-                  <>
-                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                    Importing...
-                  </>
-                ) : file.imported ? (
-                  'Imported'
-                ) : (
-                  <>
+              <div className="ml-4 flex gap-2">
+                <button
+                  onClick={() => handleImportFile(file)}
+                  disabled={file.imported || importingFiles.has(file.extract_number)}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm flex items-center gap-2"
+                  title="Quick import - may timeout on large files"
+                >
+                  {importingFiles.has(file.extract_number) ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Importing...
+                    </>
+                  ) : file.imported ? (
+                    'Imported'
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+                        <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
+                      Quick Import
+                    </>
+                  )}
+                </button>
+                {!file.imported && !importingFiles.has(file.extract_number) && (
+                  <button
+                    onClick={() => handleBatchedImportFromUrl(file)}
+                    className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 text-sm flex items-center gap-2"
+                    title="Batched import - processes in small chunks to avoid timeouts"
+                  >
                     <svg className="w-4 h-4" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
-                      <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
                     </svg>
-                    Import
-                  </>
+                    Batched Import
+                  </button>
                 )}
-              </button>
+              </div>
             </div>
           )
 
@@ -409,6 +605,7 @@ export default function ImportsPage() {
                     <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">
                       Records
                     </th>
+                    <th className="w-12"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -445,10 +642,53 @@ export default function ImportsPage() {
                         <td className="px-4 py-3 text-sm" style={{ width: '15%' }}>
                           {job.recordsProcessed.toLocaleString()}
                         </td>
+                        <td className="px-4 py-3 text-sm relative">
+                          {['vercel', 'local', 'backfill', 'web_manual'].includes(job.workerType) && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setOpenMenuId(openMenuId === job.id ? null : job.id)
+                                }}
+                                className="p-1 hover:bg-gray-100 rounded"
+                                title="Actions"
+                              >
+                                <svg className="w-5 h-5 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
+                                  <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+                                </svg>
+                              </button>
+                              {openMenuId === job.id && (
+                                <>
+                                  <div
+                                    className="fixed inset-0 z-10"
+                                    onClick={() => setOpenMenuId(null)}
+                                  />
+                                  <div className="absolute right-0 top-8 z-20 bg-white border border-gray-200 rounded-lg shadow-lg py-1 w-40">
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        setOpenMenuId(null)
+                                        router.push(`/admin/imports/${job.id}/progress`)
+                                      }}
+                                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2"
+                                    >
+                                      <svg className="w-4 h-4" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                                      </svg>
+                                      View Progress
+                                    </button>
+                                  </div>
+                                </>
+                              )}
+                            </>
+                          )}
+                        </td>
                       </tr>
                       {job.status === 'completed' && (
                         <tr>
-                          <td colSpan={7} className="p-0">
+                          <td colSpan={8} className="p-0">
                             <ExpandableJobDetails
                               jobId={job.id}
                               extractNumber={job.extractNumber}

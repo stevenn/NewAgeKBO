@@ -81,6 +81,24 @@ When building tools for this project, consider:
 - The application takes specific care for supporting the codetables defined in code.csv and the multi-lingual character of the dataset.
 - The central entity of the dataset is the enterprise, which has an optional subhierarchy of establishments.
 
+## Database Queries
+
+**IMPORTANT**: When you need to run investigative database queries against MotherDuck:
+
+1. **Always use the template script**: Copy `scripts/_template-query.ts` to a new file
+2. **Never try inline scripts**: The `lib/motherduck` functions don't work in inline tsx scripts due to environment loading issues
+3. **Follow the pattern**:
+   ```bash
+   cp scripts/_template-query.ts scripts/investigate-xyz.ts
+   # Edit the query logic in the new file
+   npx tsx scripts/investigate-xyz.ts [args]
+   # Delete the script when done
+   ```
+4. **Template benefits**: Handles dotenv loading, DuckDB connection setup, and proper result iteration
+5. **Remember**: Column names in the database often have underscores (e.g., `_extract_number`, not `extract_number`)
+
+This pattern is currently required - if a better approach is found to avoid script creation, update this section.
+
 ## Considerations
 
 - Always check size of sample CSV files prior to reading them, some files are very large!
