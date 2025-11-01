@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS import_staging_establishments (
 
   -- Establishment columns (matching establishments table schema)
   establishment_number VARCHAR NOT NULL,
-  enterprise_number VARCHAR NOT NULL,
+  enterprise_number VARCHAR,            -- NULL for delete operations
   start_date DATE,
 
   -- Metadata
@@ -118,15 +118,15 @@ CREATE TABLE IF NOT EXISTS import_staging_denominations (
   -- Denomination columns (from CSV: EntityNumber, Language, TypeOfDenomination, Denomination)
   -- Note: entity_type NOT in CSV - computed during INSERT based on EntityNumber format
   entity_number VARCHAR NOT NULL,
-  language VARCHAR NOT NULL,
-  denomination_type VARCHAR NOT NULL,
-  denomination VARCHAR NOT NULL,
+  language VARCHAR,                     -- NULL for delete operations
+  denomination_type VARCHAR,            -- NULL for delete operations
+  denomination VARCHAR,                 -- NULL for delete operations
 
   -- Metadata
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
   CHECK (operation IN ('delete', 'insert')),
-  CHECK (language IN ('0', '1', '2', '3', '4'))
+  CHECK (language IS NULL OR language IN ('0', '1', '2', '3', '4'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_staging_denominations_batch
@@ -149,7 +149,7 @@ CREATE TABLE IF NOT EXISTS import_staging_addresses (
   -- Address columns (from CSV: EntityNumber, TypeOfAddress, CountryNL, CountryFR, ...)
   -- Note: entity_type NOT in CSV - computed during INSERT based on EntityNumber format
   entity_number VARCHAR NOT NULL,
-  type_of_address VARCHAR NOT NULL,
+  type_of_address VARCHAR,              -- NULL for delete operations
   country_nl VARCHAR,
   country_fr VARCHAR,
   zipcode VARCHAR,
@@ -166,7 +166,7 @@ CREATE TABLE IF NOT EXISTS import_staging_addresses (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
   CHECK (operation IN ('delete', 'insert')),
-  CHECK (type_of_address IN ('REGO', 'BAET', 'ABBR', 'OBAD'))
+  CHECK (type_of_address IS NULL OR type_of_address IN ('REGO', 'BAET', 'ABBR', 'OBAD'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_staging_addresses_batch
@@ -189,9 +189,9 @@ CREATE TABLE IF NOT EXISTS import_staging_contacts (
   -- Contact columns (from CSV: EntityNumber, EntityContact, ContactType, Value)
   -- Note: entity_type NOT in CSV - computed during INSERT based on EntityNumber format
   entity_number VARCHAR NOT NULL,
-  entity_contact VARCHAR NOT NULL,
-  contact_type VARCHAR NOT NULL,
-  contact_value VARCHAR NOT NULL,
+  entity_contact VARCHAR,               -- NULL for delete operations
+  contact_type VARCHAR,                 -- NULL for delete operations
+  contact_value VARCHAR,                -- NULL for delete operations
 
   -- Metadata
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -219,17 +219,17 @@ CREATE TABLE IF NOT EXISTS import_staging_activities (
   -- Activity columns (from CSV: EntityNumber, ActivityGroup, NaceVersion, NaceCode, Classification)
   -- Note: entity_type NOT in CSV - computed during INSERT based on EntityNumber format
   entity_number VARCHAR NOT NULL,
-  activity_group VARCHAR NOT NULL,
-  nace_version VARCHAR NOT NULL,
-  nace_code VARCHAR NOT NULL,
-  classification VARCHAR NOT NULL,
+  activity_group VARCHAR,               -- NULL for delete operations
+  nace_version VARCHAR,                 -- NULL for delete operations
+  nace_code VARCHAR,                    -- NULL for delete operations
+  classification VARCHAR,               -- NULL for delete operations
 
   -- Metadata
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
   CHECK (operation IN ('delete', 'insert')),
-  CHECK (classification IN ('MAIN', 'SECO', 'ANCI')),
-  CHECK (nace_version IN ('2003', '2008', '2025'))
+  CHECK (classification IS NULL OR classification IN ('MAIN', 'SECO', 'ANCI')),
+  CHECK (nace_version IS NULL OR nace_version IN ('2003', '2008', '2025'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_staging_activities_batch

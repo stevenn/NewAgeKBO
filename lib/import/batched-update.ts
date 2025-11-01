@@ -235,7 +235,9 @@ async function populateStagingTable(
   const csvColumns = Object.keys(records[0])
   const dbColumns = csvColumns.map(col => csvColumnToDbColumn(col))
 
-  // Build column list for staging table (without entity_type - computed later)
+  // Build column list for staging table
+  // Order: job_id, batch_number, operation, processed=false(default), ...data columns, created_at=now(default)
+  // We only specify the columns we're providing values for
   const stagingColumns = ['job_id', 'batch_number', 'operation', ...dbColumns]
 
   // Build VALUES for all records
@@ -247,7 +249,7 @@ async function populateStagingTable(
 
     const recordValues = csvColumns.map(col => {
       const val = record[col]
-      if (val === '' || val === null) {
+      if (val === '' || val === null || val === undefined) {
         return 'NULL'
       }
 
@@ -261,13 +263,20 @@ async function populateStagingTable(
       return `'${val.replace(/'/g, "''")}'`
     })
 
-    values.push(`('${jobId}', ${batchNumber}, '${operation}', ${recordValues.join(',')})`)
+    values.push(`('${jobId}', ${batchNumber}, '${operation}', ${recordValues.join(', ')})`)
   }
 
   const sql = `
     INSERT INTO ${stagingTableName} (${stagingColumns.join(', ')})
-    VALUES ${values.join(',\n      ')}
+    VALUES
+      ${values.join(',\n      ')}
   `
+
+  // Debug: log first value to check structure
+  if (values.length > 0) {
+    console.log(`   DEBUG - Columns: ${stagingColumns.join(', ')}`)
+    console.log(`   DEBUG - First value: ${values[0]}`)
+  }
 
   await executeStatement(db, sql)
 }
@@ -536,7 +545,7 @@ async function executeBatchDelete(
   `)
 
   // Count how many were marked as historical
-  const result = await executeQuery<{ count: number }>(db, `
+  const result = await executeQuery<{ count: bigint | number }>(db, `
     SELECT COUNT(*) as count
     FROM ${stagingTableName}
     WHERE job_id = '${jobId}'
@@ -545,7 +554,7 @@ async function executeBatchDelete(
       AND processed = true
   `)
 
-  return result[0]?.count || 0
+  return Number(result[0]?.count || 0)
 }
 
 /**
@@ -595,7 +604,7 @@ async function executeBatchInsert(
   `)
 
   // Count how many were inserted
-  const result = await executeQuery<{ count: number }>(db, `
+  const result = await executeQuery<{ count: bigint | number }>(db, `
     SELECT COUNT(*) as count
     FROM ${stagingTableName}
     WHERE job_id = '${jobId}'
@@ -604,7 +613,7 @@ async function executeBatchInsert(
       AND processed = true
   `)
 
-  return result[0]?.count || 0
+  return Number(result[0]?.count || 0)
 }
 
 /**
@@ -615,7 +624,7 @@ async function calculateProgress(
   db: any,
   jobId: string
 ): Promise<{ completed: number; total: number }> {
-  const result = await executeQuery<{ completed: number; total: number }>(db, `
+  const result = await executeQuery<{ completed: bigint | number; total: bigint | number }>(db, `
     SELECT
       SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
       COUNT(*) as total
@@ -623,14 +632,18 @@ async function calculateProgress(
     WHERE job_id = '${jobId}'
   `)
 
-  return result[0] || { completed: 0, total: 0 }
+  const row = result[0]
+  return {
+    completed: Number(row?.completed || 0),
+    total: Number(row?.total || 0)
+  }
 }
 
 // Build INSERT SQL for specific table types (reused from daily-update.ts logic)
 
 function buildEnterpriseInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
   return `
-    INSERT INTO enterprises (
+    INSERT OR REPLACE INTO enterprises (
       enterprise_number, status, juridical_situation, type_of_enterprise,
       juridical_form, juridical_form_cac, start_date,
       primary_name, primary_name_language, primary_name_nl, primary_name_fr, primary_name_de,
@@ -652,7 +665,7 @@ function buildEnterpriseInsert(stagingTable: string, jobId: string, batch: numbe
 
 function buildEstablishmentInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
   return `
-    INSERT INTO establishments (
+    INSERT OR REPLACE INTO establishments (
       establishment_number, enterprise_number, start_date,
       _snapshot_date, _extract_number, _is_current
     )
@@ -669,7 +682,7 @@ function buildEstablishmentInsert(stagingTable: string, jobId: string, batch: nu
 
 function buildBranchInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
   return `
-    INSERT INTO branches (
+    INSERT OR REPLACE INTO branches (
       id, enterprise_number, start_date,
       _snapshot_date, _extract_number, _is_current
     )
@@ -686,7 +699,7 @@ function buildBranchInsert(stagingTable: string, jobId: string, batch: number, s
 
 function buildActivityInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
   return `
-    INSERT INTO activities (
+    INSERT OR REPLACE INTO activities (
       id, entity_number, entity_type, activity_group, nace_version, nace_code, classification,
       _snapshot_date, _extract_number, _is_current
     )
@@ -709,7 +722,7 @@ function buildActivityInsert(stagingTable: string, jobId: string, batch: number,
 
 function buildAddressInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
   return `
-    INSERT INTO addresses (
+    INSERT OR REPLACE INTO addresses (
       id, entity_number, entity_type, type_of_address,
       country_nl, country_fr, zipcode, municipality_nl, municipality_fr,
       street_nl, street_fr, house_number, box, extra_address_info, date_striking_off,
@@ -735,7 +748,7 @@ function buildAddressInsert(stagingTable: string, jobId: string, batch: number, 
 
 function buildContactInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
   return `
-    INSERT INTO contacts (
+    INSERT OR REPLACE INTO contacts (
       id, entity_number, entity_type, entity_contact, contact_type, contact_value,
       _snapshot_date, _extract_number, _is_current
     )
@@ -758,7 +771,7 @@ function buildContactInsert(stagingTable: string, jobId: string, batch: number, 
 
 function buildDenominationInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
   return `
-    INSERT INTO denominations (
+    INSERT OR REPLACE INTO denominations (
       id, entity_number, entity_type, denomination_type, language, denomination,
       _snapshot_date, _extract_number, _is_current
     )
@@ -950,22 +963,26 @@ export async function getImportProgress(
       ORDER BY table_name
     `)
 
-    // Calculate overall progress
-    const totalBatches = batchStats.reduce((sum, s) => sum + s.total, 0)
-    const completedBatches = batchStats.reduce((sum, s) => sum + s.completed, 0)
+    // Calculate overall progress (convert BigInt to Number)
+    const totalBatches = batchStats.reduce((sum, s) => sum + Number(s.total), 0)
+    const completedBatches = batchStats.reduce((sum, s) => sum + Number(s.completed), 0)
     const percentage = totalBatches > 0 ? Math.round((completedBatches / totalBatches) * 100) : 0
 
     // Build table status map
     const tables: Record<string, TableBatchStatus> = {}
     for (const stat of batchStats) {
+      const completed = Number(stat.completed)
+      const total = Number(stat.total)
+      const processing = Number(stat.processing)
+
       const tableStatus: 'pending' | 'processing' | 'completed' =
-        stat.completed === stat.total ? 'completed' :
-        stat.processing > 0 ? 'processing' :
+        completed === total ? 'completed' :
+        processing > 0 ? 'processing' :
         'pending'
 
       tables[stat.table_name] = {
-        completed: stat.completed,
-        total: stat.total,
+        completed,
+        total,
         status: tableStatus
       }
     }
@@ -1083,7 +1100,7 @@ async function resolvePrimaryNames(
   await executeStatement(db, sql)
 
   // Count how many were updated
-  const result = await executeQuery<{ count: number }>(db, `
+  const result = await executeQuery<{ count: bigint | number }>(db, `
     SELECT COUNT(*) as count
     FROM enterprises
     WHERE _snapshot_date = '${snapshotDate}'
@@ -1092,7 +1109,7 @@ async function resolvePrimaryNames(
       AND primary_name != enterprise_number
   `)
 
-  return result[0]?.count || 0
+  return Number(result[0]?.count || 0)
 }
 
 /**
@@ -1136,15 +1153,16 @@ export async function finalizeImport(
 
   try {
     // Step 1: Verify all batches completed
-    const pendingBatches = await executeQuery<{ count: number }>(db, `
+    const pendingBatches = await executeQuery<{ count: bigint | number }>(db, `
       SELECT COUNT(*) as count
       FROM import_job_batches
       WHERE job_id = '${jobId}'
         AND status != 'completed'
     `)
 
-    if (pendingBatches[0]?.count > 0) {
-      throw new Error(`Cannot finalize: ${pendingBatches[0].count} batches still pending or failed`)
+    const pendingCount = Number(pendingBatches[0]?.count || 0)
+    if (pendingCount > 0) {
+      throw new Error(`Cannot finalize: ${pendingCount} batches still pending or failed`)
     }
 
     // Step 2: Get job metadata
@@ -1168,17 +1186,19 @@ export async function finalizeImport(
     }
 
     // Step 4: Update job status to completed
-    const totalRecords = await executeQuery<{ total: number }>(db, `
+    const totalRecords = await executeQuery<{ total: bigint | number | null }>(db, `
       SELECT SUM(records_count) as total
       FROM import_job_batches
       WHERE job_id = '${jobId}'
     `)
 
+    const recordsProcessed = Number(totalRecords[0]?.total || 0)
+
     await executeStatement(db, `
       UPDATE import_jobs
       SET status = 'completed',
           completed_at = '${new Date().toISOString()}',
-          records_processed = ${totalRecords[0]?.total || 0}
+          records_processed = ${recordsProcessed}
       WHERE id = '${jobId}'
     `)
 
