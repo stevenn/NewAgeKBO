@@ -13,12 +13,12 @@
 
 import StreamZip from 'node-stream-zip'
 import { parse } from 'csv-parse/sync'
-import { createHash, randomUUID } from 'crypto'
+import { randomUUID } from 'crypto'
+import type { DuckDBConnection } from '@duckdb/node-api'
 import { connectMotherduck, closeMotherduck, executeQuery, executeStatement } from '../motherduck'
 import {
   csvColumnToDbColumn,
   csvTableToDbTable,
-  computeEntityType,
   convertKboDateFormat,
   isKboDateFormat
 } from '../utils/column-mapping'
@@ -141,14 +141,6 @@ interface MetaRecord {
 // ============================================================================
 
 /**
- * Generate a short hash for a string (8 characters)
- * Used to create unique IDs for denominations
- */
-function shortHash(text: string): string {
-  return createHash('sha256').update(text).digest('hex').substring(0, 8)
-}
-
-/**
  * Parse metadata from meta.csv in ZIP
  */
 async function parseMetadata(zip: StreamZip.StreamZipAsync): Promise<RawMetadata> {
@@ -220,15 +212,14 @@ function calculateBatchCount(recordCount: number, batchSize: number): number {
  * Populate a staging table with CSV records, assigning batch numbers
  */
 async function populateStagingTable(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  db: any,
+  db: DuckDBConnection,
   stagingTableName: string,
-  dbTableName: string,
+  _dbTableName: string,
   records: Record<string, string>[],
   operation: 'delete' | 'insert',
   jobId: string,
   batchSize: number,
-  metadata: Metadata
+  _metadata: Metadata
 ): Promise<void> {
   if (records.length === 0) return
 
@@ -285,8 +276,7 @@ async function populateStagingTable(
  * Create batch tracking records in import_job_batches
  */
 async function createBatchRecords(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  db: any,
+  db: DuckDBConnection,
   jobId: string,
   tableName: string,
   operation: 'delete' | 'insert',
@@ -504,8 +494,7 @@ export async function prepareImport(
  * Execute batch DELETE operation (mark records as historical)
  */
 async function executeBatchDelete(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  db: any,
+  db: DuckDBConnection,
   tableName: string,
   stagingTableName: string,
   jobId: string,
@@ -561,8 +550,7 @@ async function executeBatchDelete(
  * Execute batch INSERT operation
  */
 async function executeBatchInsert(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  db: any,
+  db: DuckDBConnection,
   tableName: string,
   stagingTableName: string,
   jobId: string,
@@ -570,9 +558,6 @@ async function executeBatchInsert(
   snapshotDate: string,
   extractNumber: number
 ): Promise<number> {
-  const needsEntityType = ['activities', 'addresses', 'contacts', 'denominations'].includes(tableName)
-  const needsComputedId = ['activities', 'addresses', 'contacts', 'denominations'].includes(tableName)
-
   // Build INSERT SQL based on table type
   let sql = ''
 
@@ -620,8 +605,7 @@ async function executeBatchInsert(
  * Calculate overall progress for a job
  */
 async function calculateProgress(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  db: any,
+  db: DuckDBConnection,
   jobId: string
 ): Promise<{ completed: number; total: number }> {
   const result = await executeQuery<{ completed: bigint | number; total: bigint | number }>(db, `
@@ -812,10 +796,20 @@ export async function processBatch(
 
   try {
     // Step 1: Find the batch to process
-    let batch: any
+    let batch: {
+      table_name: string;
+      batch_number: number;
+      operation: 'delete' | 'insert';
+      status: string;
+    }
     if (tableName && batchNumber !== undefined) {
       // Process specific batch
-      const batches = await executeQuery(db, `
+      const batches = await executeQuery<{
+        table_name: string;
+        batch_number: number;
+        operation: 'delete' | 'insert';
+        status: string;
+      }>(db, `
         SELECT * FROM import_job_batches
         WHERE job_id = '${jobId}'
           AND table_name = '${tableName}'
@@ -825,7 +819,12 @@ export async function processBatch(
       batch = batches[0]
     } else {
       // Find next pending batch
-      const batches = await executeQuery(db, `
+      const batches = await executeQuery<{
+        table_name: string;
+        batch_number: number;
+        operation: 'delete' | 'insert';
+        status: string;
+      }>(db, `
         SELECT * FROM import_job_batches
         WHERE job_id = '${jobId}'
           AND status = 'pending'
@@ -851,7 +850,10 @@ export async function processBatch(
     `)
 
     // Step 3: Get job metadata for snapshot_date and extract_number
-    const jobs = await executeQuery(db, `
+    const jobs = await executeQuery<{
+      snapshot_date: string;
+      extract_number: number;
+    }>(db, `
       SELECT snapshot_date, extract_number
       FROM import_jobs
       WHERE id = '${jobId}'
@@ -889,7 +891,11 @@ export async function processBatch(
     const progress = await calculateProgress(db, jobId)
 
     // Step 7: Find next batch
-    const nextBatches = await executeQuery(db, `
+    const nextBatches = await executeQuery<{
+      table_name: string;
+      batch_number: number;
+      operation: 'delete' | 'insert';
+    }>(db, `
       SELECT table_name, batch_number, operation
       FROM import_job_batches
       WHERE job_id = '${jobId}'
@@ -938,7 +944,7 @@ export async function getImportProgress(
 
   try {
     // Get job status
-    const jobs = await executeQuery(db, `
+    const jobs = await executeQuery<{ status: string }>(db, `
       SELECT status FROM import_jobs WHERE id = '${jobId}'
     `)
     const jobStatus = jobs[0]?.status || 'pending'
@@ -1019,7 +1025,7 @@ export async function getImportProgress(
 
     return {
       job_id: jobId,
-      status: jobStatus,
+      status: jobStatus as 'pending' | 'processing' | 'completed' | 'failed',
       overall_progress: {
         completed_batches: completedBatches,
         total_batches: totalBatches,
@@ -1049,8 +1055,7 @@ export async function getImportProgress(
  * to use actual names from the denominations table
  */
 async function resolvePrimaryNames(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  db: any,
+  db: DuckDBConnection,
   snapshotDate: string,
   extractNumber: number
 ): Promise<number> {
@@ -1116,8 +1121,7 @@ async function resolvePrimaryNames(
  * Clean up all staging tables for a completed job
  */
 async function cleanupStagingTables(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  db: any,
+  db: DuckDBConnection,
   jobId: string
 ): Promise<void> {
   const stagingTables = [
