@@ -20,6 +20,7 @@ const SCHEMA_FILES = [
   '08_branches.sql',
   '09_codes.sql',
   '10_import_jobs.sql',
+  '11_batched_import.sql',
 ] as const
 
 /**
@@ -98,6 +99,14 @@ export function extractTableNames(): string[] {
     'branches',
     'codes',
     'import_jobs',
+    'import_job_batches',
+    'import_staging_enterprises',
+    'import_staging_establishments',
+    'import_staging_denominations',
+    'import_staging_addresses',
+    'import_staging_contacts',
+    'import_staging_activities',
+    'import_staging_branches',
   ]
 }
 
