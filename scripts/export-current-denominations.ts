@@ -36,7 +36,7 @@ async function exportDenominations() {
     console.log('1️⃣  Connecting to Motherduck...')
     const mdConfig = getMotherduckConfig()
     const db = await connectMotherduck()
-    await executeQuery(db, `USE ${mdConfig.database}`)
+    // Note: connectMotherduck() already does "USE md" internally
     console.log(`   ✅ Connected to database: ${mdConfig.database}\n`)
 
     // Query current denominations, excluding those for inactive/deleted enterprises
