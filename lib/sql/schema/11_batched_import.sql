@@ -115,18 +115,17 @@ CREATE TABLE IF NOT EXISTS import_staging_denominations (
   operation VARCHAR NOT NULL,
   processed BOOLEAN DEFAULT false,
 
-  -- Denomination columns (matching denominations table schema)
+  -- Denomination columns (from CSV: EntityNumber, Language, TypeOfDenomination, Denomination)
+  -- Note: entity_type NOT in CSV - computed during INSERT based on EntityNumber format
   entity_number VARCHAR NOT NULL,
-  entity_type VARCHAR NOT NULL,
-  denomination_type VARCHAR NOT NULL,
   language VARCHAR NOT NULL,
+  denomination_type VARCHAR NOT NULL,
   denomination VARCHAR NOT NULL,
 
   -- Metadata
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
   CHECK (operation IN ('delete', 'insert')),
-  CHECK (entity_type IN ('enterprise', 'establishment')),
   CHECK (language IN ('0', '1', '2', '3', '4'))
 );
 
@@ -147,9 +146,9 @@ CREATE TABLE IF NOT EXISTS import_staging_addresses (
   operation VARCHAR NOT NULL,
   processed BOOLEAN DEFAULT false,
 
-  -- Address columns (matching addresses table schema)
+  -- Address columns (from CSV: EntityNumber, TypeOfAddress, CountryNL, CountryFR, ...)
+  -- Note: entity_type NOT in CSV - computed during INSERT based on EntityNumber format
   entity_number VARCHAR NOT NULL,
-  entity_type VARCHAR NOT NULL,
   type_of_address VARCHAR NOT NULL,
   country_nl VARCHAR,
   country_fr VARCHAR,
@@ -167,7 +166,6 @@ CREATE TABLE IF NOT EXISTS import_staging_addresses (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
   CHECK (operation IN ('delete', 'insert')),
-  CHECK (entity_type IN ('enterprise', 'establishment')),
   CHECK (type_of_address IN ('REGO', 'BAET', 'ABBR', 'OBAD'))
 );
 
@@ -188,9 +186,9 @@ CREATE TABLE IF NOT EXISTS import_staging_contacts (
   operation VARCHAR NOT NULL,
   processed BOOLEAN DEFAULT false,
 
-  -- Contact columns (matching contacts table schema)
+  -- Contact columns (from CSV: EntityNumber, EntityContact, ContactType, Value)
+  -- Note: entity_type NOT in CSV - computed during INSERT based on EntityNumber format
   entity_number VARCHAR NOT NULL,
-  entity_type VARCHAR NOT NULL,
   entity_contact VARCHAR NOT NULL,
   contact_type VARCHAR NOT NULL,
   contact_value VARCHAR NOT NULL,
@@ -198,8 +196,7 @@ CREATE TABLE IF NOT EXISTS import_staging_contacts (
   -- Metadata
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
-  CHECK (operation IN ('delete', 'insert')),
-  CHECK (entity_type IN ('enterprise', 'establishment'))
+  CHECK (operation IN ('delete', 'insert'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_staging_contacts_batch
@@ -219,9 +216,9 @@ CREATE TABLE IF NOT EXISTS import_staging_activities (
   operation VARCHAR NOT NULL,
   processed BOOLEAN DEFAULT false,
 
-  -- Activity columns (matching activities table schema)
+  -- Activity columns (from CSV: EntityNumber, ActivityGroup, NaceVersion, NaceCode, Classification)
+  -- Note: entity_type NOT in CSV - computed during INSERT based on EntityNumber format
   entity_number VARCHAR NOT NULL,
-  entity_type VARCHAR NOT NULL,
   activity_group VARCHAR NOT NULL,
   nace_version VARCHAR NOT NULL,
   nace_code VARCHAR NOT NULL,
@@ -231,7 +228,6 @@ CREATE TABLE IF NOT EXISTS import_staging_activities (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
   CHECK (operation IN ('delete', 'insert')),
-  CHECK (entity_type IN ('enterprise', 'establishment')),
   CHECK (classification IN ('MAIN', 'SECO', 'ANCI')),
   CHECK (nace_version IN ('2003', '2008', '2025'))
 );

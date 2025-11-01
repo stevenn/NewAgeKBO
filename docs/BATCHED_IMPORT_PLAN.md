@@ -64,6 +64,10 @@ Stores parsed CSV data with proper column types temporarily during import.
 
 **Decision:** Use separate staging tables for each entity type (enterprise, establishment, denomination, address, contact, activity, branch) rather than a single table with JSON. This provides type safety, better performance, and clearer schema alignment with final tables.
 
+**Important:** Staging table schemas match the source CSV columns exactly. The `entity_type` column (present in final tables for denominations, addresses, contacts, and activities) is NOT stored in staging tables because it's not in the source CSV. Instead, it's computed during the INSERT operation based on EntityNumber format:
+- Enterprise: `9999.999.999` (e.g., `0407.704.262`) - SUBSTRING(entity_number, 2, 1) != '.'
+- Establishment: `9.999.999.999` (e.g., `2.134.631.587`) - SUBSTRING(entity_number, 2, 1) = '.'
+
 ```sql
 -- Example: Enterprise staging
 CREATE TABLE import_staging_enterprise (
@@ -408,11 +412,11 @@ WHERE job_id = '${jobId}'
   AND batch_number = ${batchNumber};
 ```
 
-**Example 2: Activity (table with computed composite ID)**
+**Example 2: Activity (table with computed composite ID and entity_type)**
 
 ```sql
-INSERT INTO activity (
-  id, entity_number, activity_group, nace_version, nace_code, classification,
+INSERT INTO activities (
+  id, entity_number, entity_type, activity_group, nace_version, nace_code, classification,
   _snapshot_date, _extract_number, _is_current
 )
 SELECT
@@ -420,6 +424,15 @@ SELECT
   entity_number || '_' || activity_group || '_' || nace_version || '_' || nace_code,
 
   entity_number,
+
+  -- Compute entity_type from EntityNumber format
+  -- Enterprise: 9999.999.999 (e.g., 0407.704.262)
+  -- Establishment: 9.999.999.999 (e.g., 2.134.631.587)
+  CASE
+    WHEN SUBSTRING(entity_number, 2, 1) = '.' THEN 'establishment'
+    ELSE 'enterprise'
+  END as entity_type,
+
   activity_group,
   nace_version,
   nace_code,
@@ -427,18 +440,20 @@ SELECT
   '${snapshotDate}'::DATE,
   ${extractNumber},
   true
-FROM import_staging_activity
+FROM import_staging_activities
 WHERE job_id = '${jobId}'
   AND operation = 'insert'
   AND batch_number = ${batchNumber}
   AND processed = false;
 
 -- Mark as processed
-UPDATE import_staging_activity SET processed = true
+UPDATE import_staging_activities SET processed = true
 WHERE job_id = '${jobId}'
   AND operation = 'insert'
   AND batch_number = ${batchNumber};
 ```
+
+**Note:** Similar entity_type computation applies to denominations, addresses, and contacts staging tables. The entity_type is NOT present in the source CSV files but is computed during INSERT based on the EntityNumber format.
 
 ---
 
