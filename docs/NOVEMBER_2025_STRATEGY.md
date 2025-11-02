@@ -91,6 +91,17 @@ This document captures the strategic decisions and approved plan for processing 
 - `SCHEMA_VERIFICATION.md` - Schema findings and fixes
 - `NOVEMBER_2025_STRATEGY.md` - This document
 
+## Schema Verification Summary
+
+Following the discovery of schema inconsistencies in newly created monthly validation scripts, two comprehensive audits were performed:
+
+1. **Live Database Schema Verification** - Queried information_schema to verify actual column structure
+2. **Daily Import Flow Review** - Audited all 14 production files for schema consistency
+
+**Result**: Production code is **fully consistent** with live database schema. See `docs/SCHEMA_CONSISTENCY_REVIEW.md` for complete 14-file audit report.
+
+**Key Finding**: The bugs found in new monthly validation scripts (codes/nace_codes inclusion, wrong PK columns) were **NOT present** in existing production code. Daily imports, batched imports, and all queries are correct.
+
 ## Critical Insights from Schema Verification
 
 ### Discovery 1: Static vs Temporal Tables
