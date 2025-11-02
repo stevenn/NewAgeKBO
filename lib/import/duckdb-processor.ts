@@ -276,11 +276,13 @@ export async function stageAllCsvFiles(
  * Mark all current records as historical in all tables
  *
  * @param motherduckDb Motherduck database connection
+ * @param extractNumber The extract number that is superseding these records
  * @param onProgress Optional progress callback
  * @returns Total number of records marked historical
  */
 export async function markAllCurrentAsHistorical(
   motherduckDb: duckdb.Database,
+  extractNumber: number,
   onProgress?: (table: string, count: number) => void
 ): Promise<number> {
   const tables = [
@@ -300,7 +302,8 @@ export async function markAllCurrentAsHistorical(
     const result = await new Promise<any[]>((resolve, reject) => {
       motherduckDb.all(
         `UPDATE ${table}
-         SET _is_current = false
+         SET _is_current = false,
+             _deleted_at_extract = ${extractNumber}
          WHERE _is_current = true`,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (err: Error | null, rows: any[]) => {
