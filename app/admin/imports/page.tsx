@@ -55,15 +55,7 @@ export default function ImportsPage() {
   const [fileErrors, setFileErrors] = useState<Map<number, string>>(new Map())
   const [showImportedFiles, setShowImportedFiles] = useState(false)
 
-  // Batched import state
-  const [uploadFile, setUploadFile] = useState<File | null>(null)
-  const [uploading, setUploading] = useState(false)
-  const [uploadError, setUploadError] = useState<string | null>(null)
-  const [uploadSuccess, setUploadSuccess] = useState<{
-    jobId: string
-    extractNumber: number
-    totalBatches: number
-  } | null>(null)
+  // Batched import state removed - only using URL-based imports from KBO portal
 
   const toggleJobExpansion = (jobId: string) => {
     setExpandedJobIds(prev => {
@@ -131,43 +123,6 @@ export default function ImportsPage() {
 
   const handlePageChange = (newPage: number) => {
     fetchJobs(newPage)
-  }
-
-  const handleBatchedImport = async () => {
-    if (!uploadFile) return
-
-    setUploading(true)
-    setUploadError(null)
-    setUploadSuccess(null)
-
-    try {
-      const formData = new FormData()
-      formData.append('file', uploadFile)
-
-      const response = await fetch('/api/admin/imports/prepare?workerType=vercel', {
-        method: 'POST',
-        body: formData,
-      })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to prepare import')
-      }
-
-      setUploadSuccess({
-        jobId: data.job_id,
-        extractNumber: data.extract_number,
-        totalBatches: data.total_batches,
-      })
-
-      // Refresh import jobs list
-      setTimeout(() => fetchJobs(currentPage), 1000)
-    } catch (err) {
-      setUploadError(err instanceof Error ? err.message : 'Unknown error')
-    } finally {
-      setUploading(false)
-    }
   }
 
   const handleBatchedImportFromUrl = async (file: AvailableFile) => {
@@ -303,91 +258,6 @@ export default function ImportsPage() {
     <div>
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">Import Management</h1>
-      </div>
-
-      {/* Manual Batched Import Section */}
-      <div className="bg-white rounded-lg border p-6 mb-6">
-        <div className="mb-4">
-          <h2 className="text-xl font-semibold">Manual Import Upload</h2>
-          <p className="text-gray-600 text-sm mt-1">
-            Upload a KBO update ZIP file for batched processing (avoids timeouts)
-          </p>
-        </div>
-
-        <div className="space-y-4">
-          {/* File Upload */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Select ZIP File
-            </label>
-            <input
-              type="file"
-              accept=".zip"
-              onChange={(e) => {
-                setUploadFile(e.target.files?.[0] || null)
-                setUploadError(null)
-                setUploadSuccess(null)
-              }}
-              disabled={uploading}
-              className="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-gray-50 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-            />
-            {uploadFile && (
-              <p className="mt-2 text-sm text-gray-600">
-                Selected: {uploadFile.name} ({Math.round(uploadFile.size / 1024)}KB)
-              </p>
-            )}
-          </div>
-
-          {/* Upload Button */}
-          <button
-            onClick={handleBatchedImport}
-            disabled={!uploadFile || uploading}
-            className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center gap-2"
-          >
-            {uploading ? (
-              <>
-                <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                Preparing Import...
-              </>
-            ) : (
-              <>
-                <svg className="w-5 h-5" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
-                  <path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                </svg>
-                Prepare Batched Import
-              </>
-            )}
-          </button>
-
-          {/* Error Message */}
-          {uploadError && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-              <p className="text-red-800 font-medium">Upload Failed</p>
-              <p className="text-red-700 text-sm mt-1">{uploadError}</p>
-            </div>
-          )}
-
-          {/* Success Message */}
-          {uploadSuccess && (
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-              <p className="text-green-800 font-medium">Import Prepared Successfully!</p>
-              <div className="text-sm text-green-700 mt-2 space-y-1">
-                <p>• Job ID: <span className="font-mono">{uploadSuccess.jobId}</span></p>
-                <p>• Extract: #{uploadSuccess.extractNumber}</p>
-                <p>• Total Batches: {uploadSuccess.totalBatches}</p>
-              </div>
-              <a
-                href={`/admin/imports/${uploadSuccess.jobId}/progress`}
-                className="inline-block mt-3 text-green-700 hover:text-green-900 font-medium text-sm underline"
-              >
-                → View Progress & Process Batches
-              </a>
-            </div>
-          )}
-        </div>
       </div>
 
       {/* Available Files List */}
