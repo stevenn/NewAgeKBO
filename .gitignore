@@ -59,3 +59,4 @@ parquet-test/
 .DS_Store
 Thumbs.db
 specs/3rdpartyapi.json
+sampledata/*.zip

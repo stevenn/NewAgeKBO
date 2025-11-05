@@ -136,6 +136,7 @@ async function processMonthlySnapshot(dataDir: string): Promise<SnapshotStats> {
     console.log('4️⃣  Marking current records as historical...\n')
     stats.recordsMarkedHistorical = await markAllCurrentAsHistorical(
       motherduckDb,
+      stats.metadata.extractNumber,
       (table: string, count: number) => {
         console.log(`   ✓ ${table.padEnd(15)} ${count.toLocaleString().padStart(10)} records marked historical`)
       }
