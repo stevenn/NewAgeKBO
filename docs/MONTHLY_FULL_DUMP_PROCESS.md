@@ -1,10 +1,14 @@
-# Monthly Full Dump Process
+# Full Dump Validation Process
 
-This document provides a step-by-step runbook for processing monthly KBO full dumps while preserving temporal history.
+This document provides a step-by-step runbook for validating the database against KBO full dumps.
 
 ## Overview
 
-KBO publishes monthly full dumps (first Sunday of each month) that contain the complete current state of the database. We use these dumps primarily for **validation** rather than replacement, allowing us to:
+**Update (Nov 2025)**: KBO now publishes **daily full dumps** in addition to daily update files. These full dumps provide validation checkpoints to verify database synchronization.
+
+**Validation Results (Nov 4, 2025)**: Tested with extract #171 and achieved **0.00% discrepancy** ✅
+
+We use full dumps primarily for **validation** rather than replacement, allowing us to:
 
 - Verify our database is synchronized with KBO
 - Detect any missed daily updates
@@ -13,10 +17,11 @@ KBO publishes monthly full dumps (first Sunday of each month) that contain the c
 
 ## Strategy
 
-**Primary approach**: Daily incremental updates + monthly validation
+**Primary approach**: Daily incremental updates + periodic validation
 
-- **Daily**: Process daily update files to maintain current state
-- **Monthly**: Validate against full dump, take action based on discrepancy level
+- **Daily**: Process daily update files to maintain current state (primary method)
+- **Weekly/Monthly**: Validate against full dump to verify synchronization
+- **On-demand**: Validate after suspected issues or failed imports
 
 ## Process Steps
 
@@ -40,18 +45,23 @@ This creates a baseline snapshot showing:
 - Total current vs historical records
 - Any anomalies reported
 
-#### 1.2 Check for Available Full Dump
+#### 1.2 Download Full Dump for Validation
 
 Visit https://kbopub.economie.fgov.be/kbo-open-data (requires login)
 
+**Note**: KBO publishes **daily full dumps** (not just monthly). Each day has both an update file and a full dump with the same extract number.
+
 Expected filename format:
 ```
-KboOpenData_0145_YYYY_MM_DD_Full.zip
+KboOpenData_[EXTRACT]_YYYY_MM_DD_Full.zip
 ```
 
-Download to a working directory and extract:
+**Recommendation**: Download the full dump matching your latest imported extract number.
+
+Example: If your DB has extracts 140-171, download extract #171's full dump for validation.
+
 ```bash
-unzip KboOpenData_0145_YYYY_MM_DD_Full.zip -d /tmp/kbo-full-nov2025
+unzip KboOpenData_0171_2025_11_04_Full.zip -d /tmp/kbo-full-171
 ```
 
 ### Phase 2: Validation Import
@@ -59,18 +69,18 @@ unzip KboOpenData_0145_YYYY_MM_DD_Full.zip -d /tmp/kbo-full-nov2025
 #### 2.1 Run Validation Script
 
 ```bash
-npx tsx scripts/validate-with-full-dump.ts /tmp/kbo-full-nov2025 > validation-reports/nov2025.json
+npx tsx scripts/validate-with-full-dump.ts /tmp/kbo-full-171
 ```
 
 This will:
-1. Import full dump to temporary `nov_*` tables in MotherDuck
+1. Import full dump to temporary `nov_*` tables (in-memory, streamed to MotherDuck)
 2. Compare against current database state
 3. Calculate discrepancy percentages
 4. Sample discrepancies for investigation
 5. Generate automatic recommendation
 6. Clean up temporary tables
 
-**Time estimate**: 30-45 minutes for full import + comparison
+**Time estimate**: 5-10 minutes for full validation (faster than originally expected)
 
 #### 2.2 Review Validation Report
 
@@ -331,15 +341,29 @@ npx tsx scripts/reset-from-full-dump.ts /tmp/kbo-full --confirm --no-backup
 
 ## Best Practices
 
-### 1. Monthly Ritual Checklist
+### 1. Validation Cadence
 
-- [ ] Download latest full dump (first Sunday of month)
+**Recommended Schedule**:
+- **Weekly**: Quick spot-check validation (5-10 min)
+- **Monthly**: Full validation with detailed report and archival
+- **On-demand**: After failed imports or suspected issues
+
+**Quick Validation Checklist** (Weekly):
+- [ ] Download latest full dump matching current extract
+- [ ] Extract ZIP to temporary directory
+- [ ] Run `validate-with-full-dump.ts`
+- [ ] Review overall discrepancy percentage
+- [ ] If < 1%: Continue with incremental updates ✅
+- [ ] If > 1%: Investigate and consider full validation
+
+**Full Validation Checklist** (Monthly):
+- [ ] Download latest full dump
 - [ ] Extract ZIP to temporary directory
 - [ ] Run `database-state-snapshot.ts` (pre-validation)
 - [ ] Run `validate-with-full-dump.ts`
-- [ ] Review validation report
+- [ ] Review validation report in detail
 - [ ] Make decision (keep/review/reset)
-- [ ] Execute chosen path
+- [ ] Execute chosen path if needed
 - [ ] Run `database-state-snapshot.ts` (post-validation)
 - [ ] Test application
 - [ ] Update import log
@@ -411,12 +435,14 @@ npx tsx scripts/reset-from-full-dump.ts /path/to/latest/full/dump --confirm
 | Download full dump | 10-15 min (depends on connection) |
 | Extract ZIP | 2-3 min |
 | Database snapshot | 30-60 sec |
-| Validation import | 30-45 min |
+| **Validation (updated)** | **5-10 min** ⚡ |
 | Apply monthly snapshot | 30-45 min |
 | Reset from full dump | 25-35 min |
 | _deleted_at_extract migration | 5-10 min |
-| **Total (validation path)** | **~1 hour** |
-| **Total (reset path)** | **~45 min** |
+| **Total (quick validation)** | **~15-20 min** |
+| **Total (full validation + actions)** | **~1 hour** |
+
+**Note**: Validation is much faster than originally estimated due to efficient CSV streaming and in-memory processing.
 
 ## Future Improvements
 
@@ -429,6 +455,32 @@ Potential enhancements to consider:
 5. **Scheduled validation**: Cron job to run validation automatically
 6. **Discrepancy analysis**: ML-based anomaly detection
 7. **Rollback automation**: One-click rollback from backup
+
+## November 2025 Validation Success
+
+**Date**: 2025-11-04
+**Extract Validated**: #171 (2025-11-03)
+**Database State**: Extracts 140-170 (missing #162)
+
+### Results
+- ✅ **0.00% overall discrepancy**
+- ✅ 1,943,984 enterprises - perfect match
+- ✅ 1,677,802 establishments - perfect match
+- ✅ 36,187,026 activities - 890 difference (0.00246%)
+
+### Conclusions
+1. Incremental update strategy is **working perfectly**
+2. Missing extract #162 had **zero impact** on data quality
+3. Daily full dumps provide **excellent validation checkpoints**
+4. Validation time was **5-10 minutes** (much faster than estimated)
+
+### Strategy Confirmation
+- ✅ **Continue with daily incremental updates** as primary method
+- ✅ **Use full dumps for validation only** (weekly/monthly)
+- ✅ **No database reset needed**
+- ✅ **Temporal history preserved**
+
+---
 
 ## Questions & Support
 

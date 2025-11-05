@@ -22,27 +22,20 @@
  * - > 5% discrepancy: Consider fresh start from full dump
  */
 
+import { DuckDBInstance } from '@duckdb/node-api'
 import { config } from 'dotenv'
-config({ path: ['.env.local', '.env'] })
-
+import { resolve, join } from 'path'
 import * as fs from 'fs'
-import {
-  connectMotherduck,
-  closeMotherduck,
-  getMotherduckConfig,
-  executeQuery
-} from '../lib/motherduck'
-import {
-  parseMetadataWithDuckDB,
-  Metadata
-} from '../lib/import/metadata'
-import {
-  initializeDuckDBWithMotherduck,
-  stageCsvFile,
-  createRankedDenominations,
-} from '../lib/import/duckdb-processor'
-import * as path from 'path'
-const { join } = path
+
+// Load environment variables from .env.local
+config({ path: resolve(__dirname, '../.env.local') })
+
+interface Metadata {
+  extractNumber: number
+  snapshotDate: string
+  extractTimestamp: string
+  extractType: string
+}
 
 interface ComparisonStats {
   table_name: string
@@ -73,83 +66,91 @@ interface ValidationReport {
 }
 
 /**
- * Import full dump into temporary tables
+ * Parse metadata from meta.csv
  */
-async function importToTempTables(
-  localDb: any,
-  motherduckDb: any,
-  dataDir: string,
-  metadata: Metadata
-): Promise<void> {
-  console.log('\n📥 Importing full dump into temporary tables...\n')
+async function parseMetadata(conn: any, dataDir: string): Promise<Metadata> {
+  const metaPath = join(dataDir, 'meta.csv')
 
-  // Stage CSV files in local DuckDB
-  await stageCsvFile(localDb, join(dataDir, 'code.csv'), 'temp_codes')
-  console.log('   ✓ code.csv staged')
-
-  await stageCsvFile(localDb, join(dataDir, 'enterprise.csv'), 'temp_enterprises')
-  console.log('   ✓ enterprise.csv staged')
-
-  await stageCsvFile(localDb, join(dataDir, 'denomination.csv'), 'temp_denominations')
-  console.log('   ✓ denomination.csv staged')
-
-  await stageCsvFile(localDb, join(dataDir, 'establishment.csv'), 'temp_establishments')
-  console.log('   ✓ establishment.csv staged')
-
-  await stageCsvFile(localDb, join(dataDir, 'address.csv'), 'temp_addresses')
-  console.log('   ✓ address.csv staged')
-
-  await stageCsvFile(localDb, join(dataDir, 'activity.csv'), 'temp_activities')
-  console.log('   ✓ activity.csv staged')
-
-  await stageCsvFile(localDb, join(dataDir, 'contact.csv'), 'temp_contacts')
-  console.log('   ✓ contact.csv staged')
-
-  await stageCsvFile(localDb, join(dataDir, 'branch.csv'), 'temp_branches')
-  console.log('   ✓ branch.csv staged')
-
-  console.log('\n   ✅ All CSV files staged in local DuckDB')
-
-  // Upload to Motherduck as temporary tables
-  console.log('\n☁️  Uploading to Motherduck temporary tables...\n')
-
-  const tables = [
-    'temp_enterprises',
-    'temp_establishments',
-    'temp_denominations',
-    'temp_addresses',
-    'temp_activities',
-    'temp_contacts',
-    'temp_branches'
-  ]
-
-  for (const table of tables) {
-    await executeQuery(localDb, `
-      CREATE OR REPLACE TABLE ${mdConfig.database}.nov_${table.replace('temp_', '')} AS
-      SELECT * FROM ${table}
-    `)
-    console.log(`   ✓ ${table} uploaded to nov_${table.replace('temp_', '')}`)
+  if (!fs.existsSync(metaPath)) {
+    throw new Error(`meta.csv not found in ${dataDir}`)
   }
 
-  console.log('\n   ✅ All temporary tables created in Motherduck')
+  const result = await conn.run(`
+    SELECT * FROM read_csv('${metaPath}', AUTO_DETECT=TRUE, HEADER=TRUE)
+  `)
+
+  const chunks = await result.fetchAllChunks()
+  if (chunks.length === 0) {
+    throw new Error('meta.csv is empty')
+  }
+
+  // meta.csv has format: Variable,Value with rows for each field
+  const metaData: Record<string, string> = {}
+  for (const chunk of chunks) {
+    const rows = chunk.getRows()
+    for (const row of rows) {
+      const variable = String(row[0])
+      const value = String(row[1])
+      metaData[variable] = value
+    }
+  }
+
+  return {
+    extractNumber: Number(metaData.ExtractNumber),
+    snapshotDate: metaData.SnapshotDate,
+    extractTimestamp: metaData.ExtractTimestamp,
+    extractType: metaData.ExtractType
+  }
+}
+
+/**
+ * Import full dump CSVs into temporary tables
+ */
+async function importToTempTables(conn: any, dataDir: string, database: string): Promise<void> {
+  console.log('\n📥 Importing full dump into temporary tables...\n')
+
+  const files = [
+    { csv: 'enterprise.csv', table: 'nov_enterprises' },
+    { csv: 'establishment.csv', table: 'nov_establishments' },
+    { csv: 'denomination.csv', table: 'nov_denominations' },
+    { csv: 'address.csv', table: 'nov_addresses' },
+    { csv: 'activity.csv', table: 'nov_activities' },
+    { csv: 'contact.csv', table: 'nov_contacts' },
+    { csv: 'branch.csv', table: 'nov_branches' }
+  ]
+
+  for (const { csv, table } of files) {
+    const csvPath = join(dataDir, csv)
+
+    if (!fs.existsSync(csvPath)) {
+      console.log(`   ⚠ ${csv} not found, skipping...`)
+      continue
+    }
+
+    console.log(`   📄 Loading ${csv}...`)
+
+    await conn.run(`
+      CREATE OR REPLACE TABLE ${table} AS
+      SELECT * FROM read_csv('${csvPath}', AUTO_DETECT=TRUE, HEADER=TRUE)
+    `)
+
+    console.log(`   ✓ ${csv} loaded to ${table}`)
+  }
+
+  console.log('\n   ✅ All CSV files loaded into temporary tables')
 }
 
 /**
  * Compare current database state with full dump
  */
-async function compareStates(motherduckDb: any): Promise<ComparisonStats[]> {
+async function compareStates(conn: any): Promise<ComparisonStats[]> {
   console.log('\n🔍 Comparing database state with full dump...\n')
 
   const comparisons: ComparisonStats[] = []
 
   // Compare enterprises
   console.log('   📊 Analyzing enterprises...')
-  const enterpriseComparison = await executeQuery<{
-    current_db_count: number
-    full_dump_count: number
-    missing_in_db: number
-    missing_in_dump: number
-  }>(motherduckDb, `
+  const entResult = await conn.run(`
     WITH current_db AS (
       SELECT enterprise_number
       FROM enterprises
@@ -166,33 +167,28 @@ async function compareStates(motherduckDb: any): Promise<ComparisonStats[]> {
       (SELECT COUNT(*) FROM current_db WHERE enterprise_number NOT IN (SELECT enterprise_number FROM full_dump)) as missing_in_dump
   `)
 
-  const ec = enterpriseComparison[0]
-  const entDiff = Math.abs(Number(ec.current_db_count) - Number(ec.full_dump_count))
-  const entPercent = Number(ec.full_dump_count) > 0
-    ? (entDiff / Number(ec.full_dump_count)) * 100
-    : 0
+  const entChunks = await entResult.fetchAllChunks()
+  const entRow = entChunks[0].getRows()[0]
+
+  const entDiff = Math.abs(Number(entRow[0]) - Number(entRow[1]))
+  const entPercent = Number(entRow[1]) > 0 ? (entDiff / Number(entRow[1])) * 100 : 0
 
   comparisons.push({
     table_name: 'enterprises',
-    current_db_count: Number(ec.current_db_count),
-    full_dump_count: Number(ec.full_dump_count),
+    current_db_count: Number(entRow[0]),
+    full_dump_count: Number(entRow[1]),
     difference: entDiff,
     difference_percent: entPercent,
-    missing_in_db: Number(ec.missing_in_db),
-    missing_in_dump: Number(ec.missing_in_dump),
-    data_mismatches: 0 // Will calculate in next phase if needed
+    missing_in_db: Number(entRow[2]),
+    missing_in_dump: Number(entRow[3]),
+    data_mismatches: 0
   })
 
-  console.log(`      DB: ${Number(ec.current_db_count).toLocaleString()} | Dump: ${Number(ec.full_dump_count).toLocaleString()} | Diff: ${entDiff.toLocaleString()} (${entPercent.toFixed(2)}%)`)
+  console.log(`      DB: ${Number(entRow[0]).toLocaleString()} | Dump: ${Number(entRow[1]).toLocaleString()} | Diff: ${entDiff.toLocaleString()} (${entPercent.toFixed(2)}%)`)
 
   // Compare establishments
   console.log('   📊 Analyzing establishments...')
-  const establishmentComparison = await executeQuery<{
-    current_db_count: number
-    full_dump_count: number
-    missing_in_db: number
-    missing_in_dump: number
-  }>(motherduckDb, `
+  const estResult = await conn.run(`
     WITH current_db AS (
       SELECT establishment_number
       FROM establishments
@@ -209,46 +205,43 @@ async function compareStates(motherduckDb: any): Promise<ComparisonStats[]> {
       (SELECT COUNT(*) FROM current_db WHERE establishment_number NOT IN (SELECT establishment_number FROM full_dump)) as missing_in_dump
   `)
 
-  const estc = establishmentComparison[0]
-  const estDiff = Math.abs(Number(estc.current_db_count) - Number(estc.full_dump_count))
-  const estPercent = Number(estc.full_dump_count) > 0
-    ? (estDiff / Number(estc.full_dump_count)) * 100
-    : 0
+  const estChunks = await estResult.fetchAllChunks()
+  const estRow = estChunks[0].getRows()[0]
+
+  const estDiff = Math.abs(Number(estRow[0]) - Number(estRow[1]))
+  const estPercent = Number(estRow[1]) > 0 ? (estDiff / Number(estRow[1])) * 100 : 0
 
   comparisons.push({
     table_name: 'establishments',
-    current_db_count: Number(estc.current_db_count),
-    full_dump_count: Number(estc.full_dump_count),
+    current_db_count: Number(estRow[0]),
+    full_dump_count: Number(estRow[1]),
     difference: estDiff,
     difference_percent: estPercent,
-    missing_in_db: Number(estc.missing_in_db),
-    missing_in_dump: Number(estc.missing_in_dump),
+    missing_in_db: Number(estRow[2]),
+    missing_in_dump: Number(estRow[3]),
     data_mismatches: 0
   })
 
-  console.log(`      DB: ${Number(estc.current_db_count).toLocaleString()} | Dump: ${Number(estc.full_dump_count).toLocaleString()} | Diff: ${estDiff.toLocaleString()} (${estPercent.toFixed(2)}%)`)
+  console.log(`      DB: ${Number(estRow[0]).toLocaleString()} | Dump: ${Number(estRow[1]).toLocaleString()} | Diff: ${estDiff.toLocaleString()} (${estPercent.toFixed(2)}%)`)
 
   // Compare activities (row counts)
   console.log('   📊 Analyzing activities (row count)...')
-  const activityComparison = await executeQuery<{
-    current_db_count: number
-    full_dump_count: number
-  }>(motherduckDb, `
+  const actResult = await conn.run(`
     SELECT
       (SELECT COUNT(*) FROM activities WHERE _is_current = true) as current_db_count,
       (SELECT COUNT(*) FROM nov_activities) as full_dump_count
   `)
 
-  const actc = activityComparison[0]
-  const actDiff = Math.abs(Number(actc.current_db_count) - Number(actc.full_dump_count))
-  const actPercent = Number(actc.full_dump_count) > 0
-    ? (actDiff / Number(actc.full_dump_count)) * 100
-    : 0
+  const actChunks = await actResult.fetchAllChunks()
+  const actRow = actChunks[0].getRows()[0]
+
+  const actDiff = Math.abs(Number(actRow[0]) - Number(actRow[1]))
+  const actPercent = Number(actRow[1]) > 0 ? (actDiff / Number(actRow[1])) * 100 : 0
 
   comparisons.push({
     table_name: 'activities',
-    current_db_count: Number(actc.current_db_count),
-    full_dump_count: Number(actc.full_dump_count),
+    current_db_count: Number(actRow[0]),
+    full_dump_count: Number(actRow[1]),
     difference: actDiff,
     difference_percent: actPercent,
     missing_in_db: 0,
@@ -256,7 +249,7 @@ async function compareStates(motherduckDb: any): Promise<ComparisonStats[]> {
     data_mismatches: 0
   })
 
-  console.log(`      DB: ${Number(actc.current_db_count).toLocaleString()} | Dump: ${Number(actc.full_dump_count).toLocaleString()} | Diff: ${actDiff.toLocaleString()} (${actPercent.toFixed(2)}%)`)
+  console.log(`      DB: ${Number(actRow[0]).toLocaleString()} | Dump: ${Number(actRow[1]).toLocaleString()} | Diff: ${actDiff.toLocaleString()} (${actPercent.toFixed(2)}%)`)
 
   console.log('\n   ✅ Comparison complete')
 
@@ -266,15 +259,11 @@ async function compareStates(motherduckDb: any): Promise<ComparisonStats[]> {
 /**
  * Get sample discrepancies for investigation
  */
-async function getSampleDiscrepancies(motherduckDb: any): Promise<ValidationReport['sample_discrepancies']> {
+async function getSampleDiscrepancies(conn: any): Promise<ValidationReport['sample_discrepancies']> {
   const samples: ValidationReport['sample_discrepancies'] = []
 
   // Find 5 enterprises in DB but not in dump
-  const missingInDump = await executeQuery<{
-    enterprise_number: string
-    status: string
-    primary_name: string
-  }>(motherduckDb, `
+  const missingInDumpResult = await conn.run(`
     SELECT
       enterprise_number,
       status,
@@ -285,20 +274,21 @@ async function getSampleDiscrepancies(motherduckDb: any): Promise<ValidationRepo
     LIMIT 5
   `)
 
-  for (const row of missingInDump) {
-    samples.push({
-      entity_id: row.enterprise_number,
-      issue_type: 'missing_in_dump',
-      db_value: `${row.status} - ${row.primary_name}`,
-      dump_value: 'NOT FOUND'
-    })
+  const missingInDumpChunks = await missingInDumpResult.fetchAllChunks()
+  for (const chunk of missingInDumpChunks) {
+    const rows = chunk.getRows()
+    for (const row of rows) {
+      samples.push({
+        entity_id: String(row[0]),
+        issue_type: 'missing_in_dump',
+        db_value: `${row[1]} - ${row[2]}`,
+        dump_value: 'NOT FOUND'
+      })
+    }
   }
 
   // Find 5 enterprises in dump but not in DB
-  const missingInDb = await executeQuery<{
-    enterprise_number: string
-    status: string
-  }>(motherduckDb, `
+  const missingInDbResult = await conn.run(`
     SELECT
       "EnterpriseNumber" as enterprise_number,
       "Status" as status
@@ -307,13 +297,17 @@ async function getSampleDiscrepancies(motherduckDb: any): Promise<ValidationRepo
     LIMIT 5
   `)
 
-  for (const row of missingInDb) {
-    samples.push({
-      entity_id: row.enterprise_number,
-      issue_type: 'missing_in_db',
-      db_value: 'NOT FOUND',
-      dump_value: row.status
-    })
+  const missingInDbChunks = await missingInDbResult.fetchAllChunks()
+  for (const chunk of missingInDbChunks) {
+    const rows = chunk.getRows()
+    for (const row of rows) {
+      samples.push({
+        entity_id: String(row[0]),
+        issue_type: 'missing_in_db',
+        db_value: 'NOT FOUND',
+        dump_value: String(row[1])
+      })
+    }
   }
 
   return samples
@@ -341,25 +335,25 @@ async function generateReport(
 
   if (overallPercent < 1) {
     recommendation = 'keep_history'
-    recommendationReason = 'Very low discrepancy (<1%). Database state is accurate. Safe to keep temporal history and import November dump as new snapshot.'
+    recommendationReason = 'Very low discrepancy (<1%). Database state is accurate. Safe to keep temporal history and continue with incremental updates.'
   } else if (overallPercent < 5) {
     recommendation = 'review_details'
-    recommendationReason = `Moderate discrepancy (${overallPercent.toFixed(2)}%). Review sample discrepancies to understand cause. Likely legitimate changes between last update and November dump. Recommend keeping history unless specific data quality issues found.`
+    recommendationReason = `Moderate discrepancy (${overallPercent.toFixed(2)}%). Review sample discrepancies to understand cause. May be due to missing incremental update #162. Recommend investigating before proceeding.`
   } else {
     recommendation = 'start_fresh'
-    recommendationReason = `High discrepancy (${overallPercent.toFixed(2)}%). Significant divergence suggests data quality or import issues. Recommend starting fresh from November dump as new baseline.`
+    recommendationReason = `High discrepancy (${overallPercent.toFixed(2)}%). Significant divergence suggests data quality or import issues. Recommend resetting from full dump #${metadata.extractNumber} as new baseline.`
   }
 
   // Generate summary
   const summary = `
 Validation Summary:
-- Current database has ${totalCurrentDb.toLocaleString()} records
-- November dump has ${totalFullDump.toLocaleString()} records
+- Current database has ${totalCurrentDb.toLocaleString()} current records
+- Full dump #${metadata.extractNumber} has ${totalFullDump.toLocaleString()} records
 - Overall discrepancy: ${overallPercent.toFixed(2)}%
 
 Key Findings:
-- Enterprises: ${comparisons[0]?.difference_percent.toFixed(2)}% difference
-- Establishments: ${comparisons[1]?.difference_percent.toFixed(2)}% difference
+- Enterprises: ${comparisons[0]?.difference_percent.toFixed(2)}% difference (${comparisons[0]?.missing_in_db} missing in DB, ${comparisons[0]?.missing_in_dump} missing in dump)
+- Establishments: ${comparisons[1]?.difference_percent.toFixed(2)}% difference (${comparisons[1]?.missing_in_db} missing in DB, ${comparisons[1]?.missing_in_dump} missing in dump)
 - Activities: ${comparisons[2]?.difference_percent.toFixed(2)}% difference
 
 Recommendation: ${recommendation.toUpperCase().replace(/_/g, ' ')}
@@ -382,7 +376,7 @@ ${recommendationReason}
 /**
  * Clean up temporary tables
  */
-async function cleanupTempTables(motherduckDb: any): Promise<void> {
+async function cleanupTempTables(conn: any): Promise<void> {
   console.log('\n🧹 Cleaning up temporary tables...\n')
 
   const tables = [
@@ -397,7 +391,7 @@ async function cleanupTempTables(motherduckDb: any): Promise<void> {
 
   for (const table of tables) {
     try {
-      await executeQuery(motherduckDb, `DROP TABLE IF EXISTS ${table}`)
+      await conn.run(`DROP TABLE IF EXISTS ${table}`)
       console.log(`   ✓ ${table} dropped`)
     } catch (err) {
       console.log(`   ⚠ Failed to drop ${table}: ${err instanceof Error ? err.message : 'Unknown'}`)
@@ -425,60 +419,77 @@ async function main() {
     process.exit(1)
   }
 
+  const token = process.env.MOTHERDUCK_TOKEN
+  const database = process.env.MOTHERDUCK_DATABASE || 'newagekbo'
+
+  if (!token) {
+    console.error('❌ MOTHERDUCK_TOKEN not set in .env.local')
+    process.exit(1)
+  }
+
   console.log('🔍 FULL DUMP VALIDATION')
-  console.log('=' .repeat(80))
+  console.log('='.repeat(80))
   console.log(`Data directory: ${dataDir}`)
   console.log()
 
-  const mdConfig = getMotherduckConfig()
-  let motherduckDb: any
-  let localDb: any
+  // Create in-memory database instance
+  const db = await DuckDBInstance.create(':memory:')
+  const conn = await db.connect()
 
   try {
-    // Connect to databases
-    console.log('1️⃣  Connecting to Motherduck...')
-    motherduckDb = await connectMotherduck()
-    await executeQuery(motherduckDb, `USE ${mdConfig.database}`)
-    console.log(`   ✅ Connected to ${mdConfig.database}`)
+    // Set directory configs for serverless compatibility
+    await conn.run(`SET home_directory='/tmp'`)
+    await conn.run(`SET extension_directory='/tmp/.duckdb/extensions'`)
+    await conn.run(`SET temp_directory='/tmp'`)
 
-    console.log('\n2️⃣  Initializing local DuckDB...')
-    localDb = await initializeDuckDBWithMotherduck(mdConfig.token, mdConfig.database || 'kbo')
-    console.log('   ✅ Local DuckDB initialized')
+    // Set Motherduck token as environment variable
+    process.env.motherduck_token = token
+
+    // Attach motherduck database
+    console.log('1️⃣  Connecting to Motherduck...')
+    await conn.run(`ATTACH 'md:${database}' AS md`)
+    await conn.run(`USE md`)
+    console.log(`   ✅ Connected to ${database}`)
 
     // Parse full dump metadata
-    console.log('\n3️⃣  Reading full dump metadata...')
-    const metadata = await parseMetadataWithDuckDB(localDb, dataDir)
+    console.log('\n2️⃣  Reading full dump metadata...')
+    const metadata = await parseMetadata(conn, dataDir)
     console.log(`   ✅ Extract #${metadata.extractNumber} (${metadata.snapshotDate})`)
 
     // Get current database extracts
-    console.log('\n4️⃣  Checking current database state...')
-    const extractsResult = await executeQuery<{ _extract_number: number }>(
-      motherduckDb,
-      'SELECT DISTINCT _extract_number FROM enterprises ORDER BY _extract_number'
-    )
-    const currentExtracts = extractsResult.map(r => r._extract_number)
+    console.log('\n3️⃣  Checking current database state...')
+    const extractsResult = await conn.run('SELECT DISTINCT _extract_number FROM enterprises ORDER BY _extract_number')
+    const extractsChunks = await extractsResult.fetchAllChunks()
+    const currentExtracts: number[] = []
+
+    for (const chunk of extractsChunks) {
+      const rows = chunk.getRows()
+      for (const row of rows) {
+        currentExtracts.push(Number(row[0]))
+      }
+    }
     console.log(`   ✅ Current extracts: ${currentExtracts.join(', ')}`)
 
     // Import to temporary tables
-    console.log('\n5️⃣  Importing full dump to temporary tables...')
-    await importToTempTables(localDb, motherduckDb, dataDir, metadata)
+    console.log('\n4️⃣  Importing full dump to temporary tables...')
+    await importToTempTables(conn, dataDir, database)
 
     // Compare states
-    console.log('\n6️⃣  Comparing database state with full dump...')
-    const comparisons = await compareStates(motherduckDb)
+    console.log('\n5️⃣  Comparing database state with full dump...')
+    const comparisons = await compareStates(conn)
 
     // Get sample discrepancies
-    console.log('\n7️⃣  Collecting sample discrepancies...')
-    const samples = await getSampleDiscrepancies(motherduckDb)
+    console.log('\n6️⃣  Collecting sample discrepancies...')
+    const samples = await getSampleDiscrepancies(conn)
     console.log(`   ✅ Found ${samples.length} sample discrepancies`)
 
     // Generate report
-    console.log('\n8️⃣  Generating validation report...')
+    console.log('\n7️⃣  Generating validation report...')
     const report = await generateReport(metadata, currentExtracts, comparisons, samples)
 
     // Clean up (unless --keep-temp flag provided)
     if (!args.includes('--keep-temp')) {
-      await cleanupTempTables(motherduckDb)
+      await cleanupTempTables(conn)
     } else {
       console.log('\n💾 Temporary tables kept (--keep-temp flag set)')
     }
@@ -495,7 +506,7 @@ async function main() {
       console.log('\n📝 Sample Discrepancies:\n')
 
       if (report.sample_discrepancies.length === 0) {
-        console.log('   No discrepancies found in sample')
+        console.log('   ✅ No discrepancies found in sample')
       } else {
         for (const sample of report.sample_discrepancies) {
           console.log(`   • ${sample.entity_id} (${sample.issue_type})`)
@@ -514,11 +525,9 @@ async function main() {
     console.error('\n❌ Validation failed:', error)
     process.exit(1)
   } finally {
-    if (motherduckDb) {
-      await closeMotherduck(motherduckDb)
-    }
+    // Always close connection
+    conn.closeSync()
   }
 }
 
-const mdConfig = getMotherduckConfig()
-main()
+main().catch(console.error)
