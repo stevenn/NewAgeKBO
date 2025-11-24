@@ -42,6 +42,12 @@ export default function AdminLayout({
             Import Jobs
           </Link>
           <Link
+            href="/admin/exports"
+            className="block rounded-lg px-4 py-2 text-gray-700 hover:bg-gray-100"
+          >
+            Export Jobs
+          </Link>
+          <Link
             href="/admin/settings"
             className="block rounded-lg px-4 py-2 text-gray-700 hover:bg-gray-100"
           >
