@@ -1,15 +1,16 @@
 /**
- * Export VAT-liable entities to MotherDuck table
+ * Export VAT-liable entity denominations to MotherDuck table
  *
- * Creates a table in MotherDuck containing entity numbers for VAT-liable entities
+ * Creates a table in MotherDuck containing denominations for VAT-liable entities
  * based on activity groups 001 (VAT), 004 (Government), and 007 (Education).
+ * Output format matches KBO denomination.csv (EntityNumber, Language, TypeOfDenomination, Denomination).
  *
  * See docs/ACTIVITY_GROUP_ANALYSIS.md for filter rationale.
  */
 
 import { randomUUID } from 'crypto'
 import { connectMotherduck, closeMotherduck } from '../motherduck'
-import type { ExportVatEntitiesResult, WorkerType, VatEntityRow } from './types'
+import type { ExportVatEntitiesResult, WorkerType } from './types'
 
 /**
  * Export VAT-liable entities to a MotherDuck table
@@ -49,24 +50,29 @@ export async function exportVatEntities(
       )
     `)
 
-    // 2. Create MotherDuck table with VAT-liable entities
-    console.log(`📊 Creating table ${tableName} with VAT-liable entities...`)
+    // 2. Create MotherDuck table with denominations for VAT-liable entities (KBO format)
+    console.log(`📊 Creating table ${tableName} with VAT-liable entity denominations...`)
 
     const createTableQuery = `
       CREATE TABLE ${tableName} AS
-      SELECT DISTINCT
-        a.entity_number,
-        e.juridical_form,
-        e.status,
-        STRING_AGG(DISTINCT a.activity_group, ',' ORDER BY a.activity_group) as activity_groups
-      FROM activities a
-      INNER JOIN enterprises e ON a.entity_number = e.enterprise_number
-      WHERE a.activity_group IN ('001', '004', '007')
-        AND a._is_current = true
-        AND e._is_current = true
-        AND e.status = 'AC'
-      GROUP BY a.entity_number, e.juridical_form, e.status
-      ORDER BY a.entity_number
+      SELECT
+        d.entity_number as "EntityNumber",
+        d.language as "Language",
+        d.denomination_type as "TypeOfDenomination",
+        d.denomination as "Denomination"
+      FROM denominations d
+      WHERE d._is_current = true
+        AND d.entity_type = 'enterprise'
+        AND d.entity_number IN (
+          SELECT DISTINCT a.entity_number
+          FROM activities a
+          INNER JOIN enterprises e ON a.entity_number = e.enterprise_number
+          WHERE a.activity_group IN ('001', '004', '007')
+            AND a._is_current = true
+            AND e._is_current = true
+            AND e.status = 'AC'
+        )
+      ORDER BY "EntityNumber", "Language", "TypeOfDenomination"
     `
 
     await conn.run(createTableQuery)
