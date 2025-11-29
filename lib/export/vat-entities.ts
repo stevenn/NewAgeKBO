@@ -1,11 +1,11 @@
 /**
- * Export VAT-liable entity denominations to MotherDuck table
+ * Export entity denominations with activity groups to MotherDuck table
  *
- * Creates a table in MotherDuck containing denominations for VAT-liable entities
- * based on activity groups 001 (VAT), 004 (Government), and 007 (Education).
- * Output format matches KBO denomination.csv (EntityNumber, Language, TypeOfDenomination, Denomination).
+ * Creates a table in MotherDuck containing denominations for all active enterprises
+ * with 7 boolean activity group columns (ag_001 through ag_007).
+ * Output format: EntityNumber, Language, TypeOfDenomination, Denomination, ag_001, ..., ag_007
  *
- * See docs/ACTIVITY_GROUP_ANALYSIS.md for filter rationale.
+ * See docs/ACTIVITY_GROUP_ANALYSIS.md for activity group definitions.
  */
 
 import { randomUUID } from 'crypto'
@@ -39,8 +39,8 @@ export async function exportVatEntities(
         table_name, expires_at, worker_type, created_by
       ) VALUES (
         '${jobId}',
-        'vat_entities',
-        '{"activity_groups": ["001", "004", "007"]}'::JSON,
+        'all_entities',
+        '{"activity_groups": "all", "schema_version": "v2"}'::JSON,
         'running',
         CURRENT_TIMESTAMP,
         '${tableName}',
@@ -50,8 +50,8 @@ export async function exportVatEntities(
       )
     `)
 
-    // 2. Create MotherDuck table with denominations for VAT-liable entities (KBO format)
-    console.log(`📊 Creating table ${tableName} with VAT-liable entity denominations...`)
+    // 2. Create MotherDuck table with denominations and activity group flags
+    console.log(`📊 Creating table ${tableName} with entity denominations and activity groups...`)
 
     const createTableQuery = `
       CREATE TABLE ${tableName} AS
@@ -59,19 +59,34 @@ export async function exportVatEntities(
         d.entity_number as "EntityNumber",
         d.language as "Language",
         d.denomination_type as "TypeOfDenomination",
-        d.denomination as "Denomination"
+        d.denomination as "Denomination",
+        COALESCE(ag.ag_001, false) as "ag_001",
+        COALESCE(ag.ag_002, false) as "ag_002",
+        COALESCE(ag.ag_003, false) as "ag_003",
+        COALESCE(ag.ag_004, false) as "ag_004",
+        COALESCE(ag.ag_005, false) as "ag_005",
+        COALESCE(ag.ag_006, false) as "ag_006",
+        COALESCE(ag.ag_007, false) as "ag_007"
       FROM denominations d
+      INNER JOIN (
+        SELECT
+          a.entity_number,
+          MAX(CASE WHEN a.activity_group = '001' THEN true ELSE false END) as ag_001,
+          MAX(CASE WHEN a.activity_group = '002' THEN true ELSE false END) as ag_002,
+          MAX(CASE WHEN a.activity_group = '003' THEN true ELSE false END) as ag_003,
+          MAX(CASE WHEN a.activity_group = '004' THEN true ELSE false END) as ag_004,
+          MAX(CASE WHEN a.activity_group = '005' THEN true ELSE false END) as ag_005,
+          MAX(CASE WHEN a.activity_group = '006' THEN true ELSE false END) as ag_006,
+          MAX(CASE WHEN a.activity_group = '007' THEN true ELSE false END) as ag_007
+        FROM activities a
+        INNER JOIN enterprises e ON a.entity_number = e.enterprise_number
+        WHERE a._is_current = true
+          AND e._is_current = true
+          AND e.status = 'AC'
+        GROUP BY a.entity_number
+      ) ag ON d.entity_number = ag.entity_number
       WHERE d._is_current = true
         AND d.entity_type = 'enterprise'
-        AND d.entity_number IN (
-          SELECT DISTINCT a.entity_number
-          FROM activities a
-          INNER JOIN enterprises e ON a.entity_number = e.enterprise_number
-          WHERE a.activity_group IN ('001', '004', '007')
-            AND a._is_current = true
-            AND e._is_current = true
-            AND e.status = 'AC'
-        )
       ORDER BY "EntityNumber", "Language", "TypeOfDenomination"
     `
 

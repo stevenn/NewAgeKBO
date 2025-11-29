@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS export_jobs (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
   -- Constraints
-  CHECK (export_type IN ('vat_entities')),    -- Extend as needed
+  CHECK (export_type IN ('vat_entities', 'all_entities')),    -- Extend as needed
   CHECK (status IN ('pending', 'running', 'completed', 'failed')),
   CHECK (worker_type IN ('vercel', 'web_manual', 'cli'))
 );

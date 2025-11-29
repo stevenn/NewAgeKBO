@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react'
 
 interface ExportJob {
   id: string
-  export_type: 'vat_entities'
+  export_type: 'vat_entities' | 'all_entities'
   status: 'pending' | 'running' | 'completed' | 'failed'
   started_at: string | null
   completed_at: string | null
@@ -155,7 +155,7 @@ export default function ExportsPage() {
         <div className="mb-4">
           <h2 className="text-xl font-semibold">Create New Export</h2>
           <p className="text-gray-600 text-sm mt-1">
-            Export VAT-liable entities (Activity Groups 001, 004, 007)
+            Export all active entities with activity group flags (ag_001 through ag_007)
           </p>
         </div>
 
@@ -184,13 +184,13 @@ export default function ExportsPage() {
               <svg className="w-5 h-5" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
                 <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
               </svg>
-              Generate VAT Entities Export
+              Generate All Entities Export
             </>
           )}
         </button>
 
         <p className="text-sm text-gray-500 mt-3">
-          Expected output: ~1.23M entities | Estimated time: 30-60 seconds | Files expire after 24 hours
+          Expected output: ~2M+ entities | Estimated time: 30-90 seconds | Files expire after 24 hours
         </p>
       </div>
 
