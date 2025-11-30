@@ -67,10 +67,10 @@ export async function GET(
 
       console.log(`📥 Downloading export from table: ${job.table_name}`)
 
-      // Query data from MotherDuck table (KBO format columns)
+      // Query data from MotherDuck table (order by EntityNumber only - schema may vary)
       const data = await executeQuery<Record<string, unknown>>(
         connection,
-        `SELECT * FROM ${job.table_name} ORDER BY "EntityNumber", "Language", "TypeOfDenomination"`
+        `SELECT * FROM ${job.table_name} ORDER BY "EntityNumber"`
       )
 
       // Convert to CSV

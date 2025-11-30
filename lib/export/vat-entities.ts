@@ -53,13 +53,15 @@ export async function exportVatEntities(
     // 2. Create MotherDuck table with denominations and activity group flags
     console.log(`📊 Creating table ${tableName} with entity denominations and activity groups...`)
 
+    // Query includes ALL active enterprises with ONE denomination per enterprise
+    // Denomination priority: 001 (legal name) > 002 (commercial) > others, then NL > FR > DE > EN
+    // Activity groups are computed from both direct enterprise activities
+    // and activities via establishments (LEFT JOIN so enterprises without activities are included)
     const createTableQuery = `
       CREATE TABLE ${tableName} AS
       SELECT
-        d.entity_number as "EntityNumber",
-        d.language as "Language",
-        d.denomination_type as "TypeOfDenomination",
-        d.denomination as "Denomination",
+        ranked.entity_number as "EntityNumber",
+        ranked.denomination as "Denomination",
         COALESCE(ag.ag_001, false) as "ag_001",
         COALESCE(ag.ag_002, false) as "ag_002",
         COALESCE(ag.ag_003, false) as "ag_003",
@@ -67,27 +69,71 @@ export async function exportVatEntities(
         COALESCE(ag.ag_005, false) as "ag_005",
         COALESCE(ag.ag_006, false) as "ag_006",
         COALESCE(ag.ag_007, false) as "ag_007"
-      FROM denominations d
-      INNER JOIN (
+      FROM (
+        -- Pick one denomination per enterprise: prefer legal name (001), then NL language
         SELECT
-          a.entity_number,
-          MAX(CASE WHEN a.activity_group = '001' THEN true ELSE false END) as ag_001,
-          MAX(CASE WHEN a.activity_group = '002' THEN true ELSE false END) as ag_002,
-          MAX(CASE WHEN a.activity_group = '003' THEN true ELSE false END) as ag_003,
-          MAX(CASE WHEN a.activity_group = '004' THEN true ELSE false END) as ag_004,
-          MAX(CASE WHEN a.activity_group = '005' THEN true ELSE false END) as ag_005,
-          MAX(CASE WHEN a.activity_group = '006' THEN true ELSE false END) as ag_006,
-          MAX(CASE WHEN a.activity_group = '007' THEN true ELSE false END) as ag_007
-        FROM activities a
-        INNER JOIN enterprises e ON a.entity_number = e.enterprise_number
-        WHERE a._is_current = true
+          d.entity_number,
+          d.denomination,
+          ROW_NUMBER() OVER (
+            PARTITION BY d.entity_number
+            ORDER BY
+              CASE d.denomination_type WHEN '001' THEN 1 WHEN '002' THEN 2 ELSE 3 END,
+              CASE d.language WHEN 'NL' THEN 1 WHEN 'FR' THEN 2 WHEN 'DE' THEN 3 WHEN 'EN' THEN 4 ELSE 5 END
+          ) as rn
+        FROM denominations d
+        INNER JOIN enterprises e ON d.entity_number = e.enterprise_number
+        WHERE d._is_current = true
+          AND d.entity_type = 'enterprise'
           AND e._is_current = true
           AND e.status = 'AC'
-        GROUP BY a.entity_number
-      ) ag ON d.entity_number = ag.entity_number
-      WHERE d._is_current = true
-        AND d.entity_type = 'enterprise'
-      ORDER BY "EntityNumber", "Language", "TypeOfDenomination"
+      ) ranked
+      LEFT JOIN (
+        -- Aggregate activity groups from both enterprise and establishment activities
+        SELECT
+          enterprise_number,
+          MAX(ag_001) as ag_001,
+          MAX(ag_002) as ag_002,
+          MAX(ag_003) as ag_003,
+          MAX(ag_004) as ag_004,
+          MAX(ag_005) as ag_005,
+          MAX(ag_006) as ag_006,
+          MAX(ag_007) as ag_007
+        FROM (
+          -- Direct enterprise activities
+          SELECT
+            a.entity_number as enterprise_number,
+            MAX(CASE WHEN a.activity_group = '001' THEN true ELSE false END) as ag_001,
+            MAX(CASE WHEN a.activity_group = '002' THEN true ELSE false END) as ag_002,
+            MAX(CASE WHEN a.activity_group = '003' THEN true ELSE false END) as ag_003,
+            MAX(CASE WHEN a.activity_group = '004' THEN true ELSE false END) as ag_004,
+            MAX(CASE WHEN a.activity_group = '005' THEN true ELSE false END) as ag_005,
+            MAX(CASE WHEN a.activity_group = '006' THEN true ELSE false END) as ag_006,
+            MAX(CASE WHEN a.activity_group = '007' THEN true ELSE false END) as ag_007
+          FROM activities a
+          WHERE a._is_current = true AND a.entity_type = 'enterprise'
+          GROUP BY a.entity_number
+
+          UNION ALL
+
+          -- Activities via establishments
+          SELECT
+            est.enterprise_number,
+            MAX(CASE WHEN a.activity_group = '001' THEN true ELSE false END) as ag_001,
+            MAX(CASE WHEN a.activity_group = '002' THEN true ELSE false END) as ag_002,
+            MAX(CASE WHEN a.activity_group = '003' THEN true ELSE false END) as ag_003,
+            MAX(CASE WHEN a.activity_group = '004' THEN true ELSE false END) as ag_004,
+            MAX(CASE WHEN a.activity_group = '005' THEN true ELSE false END) as ag_005,
+            MAX(CASE WHEN a.activity_group = '006' THEN true ELSE false END) as ag_006,
+            MAX(CASE WHEN a.activity_group = '007' THEN true ELSE false END) as ag_007
+          FROM activities a
+          INNER JOIN establishments est ON a.entity_number = est.establishment_number
+          WHERE a._is_current = true AND a.entity_type = 'establishment' AND est._is_current = true
+          GROUP BY est.enterprise_number
+        ) combined
+        GROUP BY enterprise_number
+      ) ag ON ranked.entity_number = ag.enterprise_number
+      WHERE ranked.rn = 1
+      ORDER BY "EntityNumber"
     `
 
     await conn.run(createTableQuery)
