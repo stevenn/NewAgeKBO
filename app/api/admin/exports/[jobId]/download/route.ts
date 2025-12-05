@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server'
 import { checkAdminAccess } from '@/lib/auth/check-admin'
-import { connectMotherduck, closeMotherduck, executeQuery } from '@/lib/motherduck'
+import { connectMotherduck, closeMotherduck, executeQuery, executeQueryStreaming } from '@/lib/motherduck'
 import type { ExportJob } from '@/lib/export/types'
 
 /**
  * GET /api/admin/exports/[jobId]/download
- * Download exported CSV file from MotherDuck table
+ * Download exported CSV file from MotherDuck table (streaming)
  */
 export async function GET(
   request: Request,
@@ -67,25 +67,24 @@ export async function GET(
 
       console.log(`📥 Downloading export from table: ${job.table_name}`)
 
-      // Query data from MotherDuck table (order by EntityNumber only - schema may vary)
-      const data = await executeQuery<Record<string, unknown>>(
+      // Get column names from first row
+      const sampleData = await executeQuery<Record<string, unknown>>(
         connection,
-        `SELECT * FROM ${job.table_name} ORDER BY "EntityNumber"`
+        `SELECT * FROM ${job.table_name} LIMIT 1`
       )
 
-      // Convert to CSV
-      if (data.length === 0) {
+      if (sampleData.length === 0) {
         return NextResponse.json(
           { error: 'Export table is empty' },
           { status: 404 }
         )
       }
 
-      // Build CSV content
-      const columns = Object.keys(data[0])
+      const columns = Object.keys(sampleData[0])
       const header = columns.map(col => `"${col}"`).join(',') + '\n'
 
-      const rows = data.map(row => {
+      // Helper to convert a row to CSV line
+      const rowToCsv = (row: Record<string, unknown>): string => {
         return columns
           .map(col => {
             const value = row[col]
@@ -96,25 +95,53 @@ export async function GET(
             return `"${escaped}"`
           })
           .join(',')
-      }).join('\n')
+      }
 
-      const csvContent = header + rows
+      // Create a streaming response
+      const encoder = new TextEncoder()
+      const stream = new ReadableStream({
+        async start(controller) {
+          try {
+            // Send header first
+            controller.enqueue(encoder.encode(header))
+
+            // Stream data chunks
+            const dataStream = executeQueryStreaming<Record<string, unknown>>(
+              connection,
+              `SELECT * FROM ${job.table_name} ORDER BY "EntityNumber"`
+            )
+
+            for await (const chunk of dataStream) {
+              const csvChunk = chunk.map(rowToCsv).join('\n') + '\n'
+              controller.enqueue(encoder.encode(csvChunk))
+            }
+
+            controller.close()
+          } catch (error) {
+            console.error('❌ Stream error:', error)
+            controller.error(error)
+          } finally {
+            await closeMotherduck(connection)
+          }
+        },
+      })
 
       // Generate filename with date
       const date = new Date().toISOString().split('T')[0]
       const filename = `kbo-vat-entities-${date}.csv`
 
-      // Return as downloadable file
-      return new NextResponse(csvContent, {
+      // Return as streaming downloadable file
+      return new NextResponse(stream, {
         status: 200,
         headers: {
           'Content-Type': 'text/csv; charset=utf-8',
           'Content-Disposition': `attachment; filename="${filename}"`,
-          'Content-Length': Buffer.byteLength(csvContent, 'utf8').toString(),
+          'Transfer-Encoding': 'chunked',
         },
       })
-    } finally {
+    } catch (error) {
       await closeMotherduck(connection)
+      throw error
     }
   } catch (error: unknown) {
     console.error('❌ Download failed:', error)

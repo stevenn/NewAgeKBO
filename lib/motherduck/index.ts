@@ -159,6 +159,40 @@ export async function executeTransaction(
 }
 
 /**
+ * Execute a SQL query and yield rows one chunk at a time (for streaming large results)
+ */
+export async function* executeQueryStreaming<T = unknown>(
+  connection: DuckDBConnection,
+  sql: string
+): AsyncGenerator<T[], void, unknown> {
+  try {
+    const result = await connection.run(sql)
+    const columnNames = result.columnNames()
+
+    // Fetch chunks one at a time instead of all at once
+    let chunk = await result.fetchChunk()
+    while (chunk && chunk.rowCount > 0) {
+      const rows: T[] = []
+      const rowArrays = chunk.getRows()
+      for (const rowArray of rowArrays) {
+        const rowObject: Record<string, unknown> = {}
+        columnNames.forEach((colName, idx) => {
+          rowObject[colName] = rowArray[idx]
+        })
+        rows.push(rowObject as T)
+      }
+      yield rows
+      chunk = await result.fetchChunk()
+    }
+  } catch (error) {
+    throw new MotherduckError(
+      `Query execution failed: ${error instanceof Error ? error.message : String(error)}`,
+      error instanceof Error ? error : undefined
+    )
+  }
+}
+
+/**
  * Close database connection
  */
 export async function closeMotherduck(connection: DuckDBConnection): Promise<void> {
