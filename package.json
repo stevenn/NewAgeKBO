@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@clerk/nextjs": "^6.33.7",
+    "@dbos-inc/dbos-sdk": "^4.5.13",
     "@duckdb/node-api": "1.4.1-r.4",
     "csv-parse": "^6.1.0",
     "dotenv": "^17.2.3",
