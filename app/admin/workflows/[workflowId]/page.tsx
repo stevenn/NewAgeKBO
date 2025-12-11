@@ -26,7 +26,7 @@ export default function WorkflowStatusPage({
 
   const fetchProgress = async () => {
     try {
-      const response = await fetch(`/api/admin/imports/${workflowId}/status`)
+      const response = await fetch(`/api/admin/workflows/${workflowId}/status`)
       const data = await response.json()
 
       if (!response.ok) {

@@ -198,7 +198,7 @@ export default function ImportsPage() {
       }
 
       // Navigate to workflow status page
-      router.push(`/admin/imports/workflow/${data.workflow_id}`)
+      router.push(`/admin/workflows/${data.workflow_id}`)
     } catch (err) {
       // Set error state for this file
       setFileErrors(prev => {
