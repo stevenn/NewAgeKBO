@@ -6,7 +6,17 @@ const isProtectedRoute = createRouteMatcher([
   '/admin(.*)',
 ])
 
+// Routes that should skip Clerk entirely (called by external services)
+const isPublicApiRoute = createRouteMatcher([
+  '/api/restate(.*)',
+])
+
 export default clerkMiddleware(async (auth, req) => {
+  // Skip Clerk for public API routes (called by Restate server)
+  if (isPublicApiRoute(req)) {
+    return NextResponse.next()
+  }
+
   // Protect admin routes
   if (isProtectedRoute(req)) {
     const { sessionClaims } = await auth.protect()
