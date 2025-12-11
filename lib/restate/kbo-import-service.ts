@@ -112,7 +112,7 @@ const kboImportWorkflow = restate.workflow({
           ctx.console.log(`Processing ${table} delete batch ${i}/${counts.delete}`);
 
           await ctx.run(`delete-${table}-${i}`, async () => {
-            await processBatch(job_id, table, i);
+            await processBatch(job_id, table, i, 'delete');
           });
 
           completedBatches++;
@@ -130,10 +130,8 @@ const kboImportWorkflow = restate.workflow({
         for (let i = 1; i <= counts.insert; i++) {
           ctx.console.log(`Processing ${table} insert batch ${i}/${counts.insert}`);
 
-          // Batch number continues after deletes
-          const batchNum = counts.delete + i;
           await ctx.run(`insert-${table}-${i}`, async () => {
-            await processBatch(job_id, table, batchNum);
+            await processBatch(job_id, table, i, 'insert');
           });
 
           completedBatches++;
@@ -143,7 +141,7 @@ const kboImportWorkflow = restate.workflow({
             completed_batches: completedBatches,
             total_batches,
             current_table: table,
-            current_batch: batchNum,
+            current_batch: i,
           } as ImportProgress);
         }
       }

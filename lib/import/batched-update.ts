@@ -790,7 +790,8 @@ function buildDenominationInsert(stagingTable: string, jobId: string, batch: num
 export async function processBatch(
   jobId: string,
   tableName?: string,
-  batchNumber?: number
+  batchNumber?: number,
+  operation?: 'delete' | 'insert'
 ): Promise<ProcessBatchResult> {
   const db = await connectMotherduck()
 
@@ -802,8 +803,24 @@ export async function processBatch(
       operation: 'delete' | 'insert';
       status: string;
     }
-    if (tableName && batchNumber !== undefined) {
-      // Process specific batch
+    if (tableName && batchNumber !== undefined && operation) {
+      // Process specific batch with operation
+      const batches = await executeQuery<{
+        table_name: string;
+        batch_number: number;
+        operation: 'delete' | 'insert';
+        status: string;
+      }>(db, `
+        SELECT * FROM import_job_batches
+        WHERE job_id = '${jobId}'
+          AND table_name = '${tableName}'
+          AND batch_number = ${batchNumber}
+          AND operation = '${operation}'
+        LIMIT 1
+      `)
+      batch = batches[0]
+    } else if (tableName && batchNumber !== undefined) {
+      // Process specific batch (legacy - no operation)
       const batches = await executeQuery<{
         table_name: string;
         batch_number: number;
