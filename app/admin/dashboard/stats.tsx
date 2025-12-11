@@ -141,8 +141,8 @@ export function DatabaseStats() {
             Natural persons ({(stats.totalEnterprises - stats.languageDistribution.reduce((sum, l) => sum + l.count, 0)).toLocaleString()}) excluded - no language data.
           </p>
           <div className="space-y-3">
-            {stats.languageDistribution.map((lang) => (
-              <div key={lang.language} className="space-y-1">
+            {stats.languageDistribution.map((lang, index) => (
+              <div key={`${lang.language}-${index}`} className="space-y-1">
                 <div className="flex justify-between text-sm">
                   <span className="font-medium">{lang.language}</span>
                   <span className="text-gray-600">

@@ -838,6 +838,36 @@ export async function processBatch(
       throw new Error('No pending batch found')
     }
 
+    // If batch is already completed, return success (idempotent for Restate retries)
+    if (batch.status === 'completed') {
+      // Get current progress for the response
+      const progressResult = await executeQuery<{
+        completed: number;
+        total: number;
+      }>(db, `
+        SELECT
+          COUNT(*) FILTER (WHERE status = 'completed') as completed,
+          COUNT(*) as total
+        FROM import_job_batches
+        WHERE job_id = '${jobId}'
+      `)
+      const { completed, total } = progressResult[0]
+
+      return {
+        batch_completed: true,
+        table_name: batch.table_name,
+        batch_number: batch.batch_number,
+        operation: batch.operation,
+        records_processed: 0,
+        progress: {
+          completed_batches: completed,
+          total_batches: total,
+          percentage: Math.round((completed / total) * 100),
+        },
+        next_batch: null,
+      }
+    }
+
     // Step 2: Mark batch as processing
     await executeStatement(db, `
       UPDATE import_job_batches
