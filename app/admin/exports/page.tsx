@@ -317,19 +317,18 @@ export default function ExportsPage() {
                             </span>
                           )}
                           {confirmDeleteId === job.id ? (
-                            <div className="flex items-center gap-2 bg-red-50 px-2 py-1 rounded">
-                              <span className="text-red-700 text-xs">Delete?</span>
+                            <div className="flex items-center gap-1">
                               <button
                                 onClick={() => handleDeleteConfirm(job.id)}
                                 className="text-white bg-red-600 hover:bg-red-700 text-xs font-medium px-2 py-0.5 rounded"
                               >
-                                Yes
+                                Confirm
                               </button>
                               <button
                                 onClick={handleDeleteCancel}
                                 className="text-gray-600 hover:text-gray-800 text-xs font-medium px-2 py-0.5 border rounded hover:bg-gray-100"
                               >
-                                No
+                                Cancel
                               </button>
                             </div>
                           ) : deletingJobId === job.id ? (
