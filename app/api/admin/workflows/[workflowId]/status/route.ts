@@ -9,6 +9,7 @@
 import { NextResponse } from "next/server";
 
 const RESTATE_INGRESS_URL = process.env.RESTATE_INGRESS_URL || "http://localhost:8080";
+const RESTATE_AUTH_TOKEN = process.env.RESTATE_AUTH_TOKEN;
 
 export async function GET(
   request: Request,
@@ -18,11 +19,16 @@ export async function GET(
     const { workflowId } = await params;
 
     // Call shared handler to get progress
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (RESTATE_AUTH_TOKEN) {
+      headers["Authorization"] = `Bearer ${RESTATE_AUTH_TOKEN}`;
+    }
+
     const response = await fetch(
       `${RESTATE_INGRESS_URL}/KboImport/${workflowId}/getProgress`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: "null",
       }
     );

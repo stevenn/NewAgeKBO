@@ -10,6 +10,7 @@
 import { NextResponse } from "next/server";
 
 const RESTATE_INGRESS_URL = process.env.RESTATE_INGRESS_URL || "http://localhost:8080";
+const RESTATE_AUTH_TOKEN = process.env.RESTATE_AUTH_TOKEN;
 
 export async function POST(request: Request) {
   try {
@@ -29,11 +30,16 @@ export async function POST(request: Request) {
       : `import-${Date.now()}`;
 
     // Start workflow via Restate ingress (fire-and-forget with /send)
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (RESTATE_AUTH_TOKEN) {
+      headers["Authorization"] = `Bearer ${RESTATE_AUTH_TOKEN}`;
+    }
+
     const response = await fetch(
       `${RESTATE_INGRESS_URL}/KboImport/${workflowId}/run/send`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ fileUrl, filename }),
       }
     );
