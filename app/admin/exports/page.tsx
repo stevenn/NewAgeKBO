@@ -34,6 +34,7 @@ export default function ExportsPage() {
 
   // Delete state
   const [deletingJobId, setDeletingJobId] = useState<string | null>(null)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
   // Prevent double-fetch in React Strict Mode
   const hasFetchedRef = React.useRef(false)
@@ -112,11 +113,16 @@ export default function ExportsPage() {
     setShowCliModal(true)
   }
 
-  const handleDelete = async (jobId: string) => {
-    if (!confirm('Are you sure you want to delete this export? This will also drop the MotherDuck table.')) {
-      return
-    }
+  const handleDeleteClick = (jobId: string) => {
+    setConfirmDeleteId(jobId)
+  }
 
+  const handleDeleteCancel = () => {
+    setConfirmDeleteId(null)
+  }
+
+  const handleDeleteConfirm = async (jobId: string) => {
+    setConfirmDeleteId(null)
     setDeletingJobId(jobId)
 
     try {
@@ -310,24 +316,43 @@ export default function ExportsPage() {
                               Error
                             </span>
                           )}
-                          <button
-                            onClick={() => handleDelete(job.id)}
-                            disabled={deletingJobId === job.id || job.status === 'running'}
-                            className="text-red-600 hover:text-red-800 text-xs font-medium flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
-                            title="Delete export"
-                          >
-                            {deletingJobId === job.id ? (
+                          {confirmDeleteId === job.id ? (
+                            <div className="flex items-center gap-2 bg-red-50 px-2 py-1 rounded">
+                              <span className="text-red-700 text-xs">Delete?</span>
+                              <button
+                                onClick={() => handleDeleteConfirm(job.id)}
+                                className="text-white bg-red-600 hover:bg-red-700 text-xs font-medium px-2 py-0.5 rounded"
+                              >
+                                Yes
+                              </button>
+                              <button
+                                onClick={handleDeleteCancel}
+                                className="text-gray-600 hover:text-gray-800 text-xs font-medium px-2 py-0.5 border rounded hover:bg-gray-100"
+                              >
+                                No
+                              </button>
+                            </div>
+                          ) : deletingJobId === job.id ? (
+                            <span className="text-red-600 text-xs font-medium flex items-center gap-1">
                               <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
                                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                               </svg>
-                            ) : (
+                              Deleting...
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => handleDeleteClick(job.id)}
+                              disabled={job.status === 'running'}
+                              className="text-red-600 hover:text-red-800 text-xs font-medium flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                              title="Delete export"
+                            >
                               <svg className="w-4 h-4" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
                                 <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                               </svg>
-                            )}
-                            Delete
-                          </button>
+                              Delete
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
