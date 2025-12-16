@@ -384,12 +384,12 @@ export default function ImportsPage() {
                       {file.filename}
                     </p>
                   </div>
-              <div className="ml-4 flex gap-2">
+              <div className="ml-4">
                 <button
-                  onClick={() => handleImportFile(file)}
+                  onClick={() => handleDurableImport(file)}
                   disabled={file.imported || importingFiles.has(file.extract_number)}
                   className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm flex items-center gap-2"
-                  title="Quick import - may timeout on large files"
+                  title="Durable import - uses Restate for automatic retries and resume"
                 >
                   {importingFiles.has(file.extract_number) ? (
                     <>
@@ -406,34 +406,10 @@ export default function ImportsPage() {
                       <svg className="w-4 h-4" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
                         <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                       </svg>
-                      Quick Import
+                      Import
                     </>
                   )}
                 </button>
-                {!file.imported && !importingFiles.has(file.extract_number) && (
-                  <>
-                    <button
-                      onClick={() => handleDurableImport(file)}
-                      className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 text-sm flex items-center gap-2"
-                      title="Durable import - uses Restate for automatic retries and resume"
-                    >
-                      <svg className="w-4 h-4" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
-                        <path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                      </svg>
-                      Durable Import
-                    </button>
-                    <button
-                      onClick={() => handleBatchedImportFromUrl(file)}
-                      className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 text-sm flex items-center gap-2"
-                      title="Batched import - processes in small chunks to avoid timeouts"
-                    >
-                      <svg className="w-4 h-4" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" stroke="currentColor">
-                        <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-                      </svg>
-                      Batched Import
-                    </button>
-                  </>
-                )}
                   </div>
                 </div>
                 {fileError && (
