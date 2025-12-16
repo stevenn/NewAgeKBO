@@ -859,8 +859,8 @@ export async function processBatch(
     if (batch.status === 'completed') {
       // Get current progress for the response
       const progressResult = await executeQuery<{
-        completed: number;
-        total: number;
+        completed: bigint | number;
+        total: bigint | number;
       }>(db, `
         SELECT
           COUNT(*) FILTER (WHERE status = 'completed') as completed,
@@ -868,7 +868,8 @@ export async function processBatch(
         FROM import_job_batches
         WHERE job_id = '${jobId}'
       `)
-      const { completed, total } = progressResult[0]
+      const completed = Number(progressResult[0].completed)
+      const total = Number(progressResult[0].total)
 
       return {
         batch_completed: true,
