@@ -67,7 +67,7 @@ async function exportSectorAdoption(outputPath: string) {
     // Query for ALL NACE codes with their counts
     const query = `
       WITH
-      -- Peppol registered companies (excluding Hermes)
+      -- Peppol registered companies
       peppol_companies AS (
         SELECT DISTINCT
           CONCAT(
@@ -76,8 +76,7 @@ async function exportSectorAdoption(outputPath: string) {
             SUBSTR(company_id, 8, 3)
           ) AS enterprise_number
         FROM peppol_registrations
-        WHERE registration_status = 'active'
-          AND as4_endpoint_url NOT LIKE '%hermes%'
+        WHERE registration_status IN ('active', 'parked')
       ),
       -- Deduplicate: assign each entity to its first NACE code (by nace_code)
       -- Filtered to NACE 2025 and activity_group 001 (BTW)
