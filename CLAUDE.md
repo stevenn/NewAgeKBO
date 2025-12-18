@@ -1,112 +1,235 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code when working with code in this repository.
 
-For technical design, data analysis results and implementation guidance and progress, check the files in the @docs folder (not: old_analysis).
+## Project Overview
 
-## Overview
+NewAgeKBO is a **production Next.js application** for managing Belgian KBO (Crossroads Bank for Enterprises) Open Data. The system provides:
 
-This repository is being developed to work with **KBO (Crossroads Bank for Enterprises) Open Data** from the Belgian Federal Public Service Economy. The KBO database contains information about all Belgian enterprises and establishments.
+- **Admin dashboard** for monitoring database status and import jobs
+- **Enterprise browser** with search, detail views, and temporal navigation
+- **Automated data imports** via Restate durable workflows
+- **Export functionality** for VAT-liable entities and sector analysis
+- **Multi-language support** (NL/FR/DE) for all data
 
-The project is currently in its initial phase with only specification documentation available. Future development will focus on processing and analyzing KBO Open Data files.
+### Tech Stack
 
-## KBO Open Data Structure
+| Layer | Technology |
+|-------|------------|
+| Framework | Next.js + TypeScript |
+| Database | Motherduck (hosted DuckDB) |
+| Auth | Clerk (admin role required) |
+| Workflows | Restate SDK (durable execution) |
+| UI | TailwindCSS + shadcn/ui |
+| Deployment | Vercel |
 
-The KBO Open Data is provided as monthly full files and daily update files, available via https://kbopub.economie.fgov.be/kbo-open-data (registration required).
+## Project Structure
 
-### File Format
-- **Format**: ZIP files containing CSV files
-- **CSV Characteristics**:
-  - Delimiter: comma (`,`)
-  - Text delimiter: double quotes (`"`)
-  - Decimal point: period (`.`)
-  - Date format: `dd-mm-yyyy`
-  - Empty values: consecutive delimiters (no space)
+```
+NewAgeKBO/
+├── app/                          # Next.js App Router
+│   ├── admin/                    # Admin pages (protected)
+│   │   ├── browse/               # Enterprise search & detail
+│   │   ├── dashboard/            # Database statistics
+│   │   ├── exports/              # Export management
+│   │   ├── imports/              # Import job management
+│   │   ├── settings/             # App settings
+│   │   └── workflows/            # Restate workflow details
+│   ├── api/                      # API routes
+│   │   ├── admin/                # Admin APIs (imports, exports, workflows)
+│   │   ├── enterprises/          # Enterprise search & detail
+│   │   └── restate/              # Restate webhook handler
+│   └── (auth)/                   # Clerk auth pages
+├── lib/
+│   ├── auth/                     # Auth helpers (checkAdminAccess)
+│   ├── cache/                    # Code description caching
+│   ├── config/                   # App configuration
+│   ├── export/                   # Export generation logic
+│   ├── import/                   # Data import processing
+│   ├── kbo-client/               # KBO portal HTTP client
+│   ├── motherduck/               # Database queries & connection
+│   │   ├── index.ts              # Connection management
+│   │   ├── enterprise-detail.ts  # Enterprise detail queries
+│   │   ├── temporal-query.ts     # Point-in-time query builders
+│   │   └── stats.ts              # Database statistics
+│   ├── restate/                  # Durable workflow definitions
+│   ├── sql/schema/               # Database DDL (11 tables)
+│   ├── types/                    # TypeScript type definitions
+│   ├── utils/                    # Utilities (dates, column mapping)
+│   └── validation/               # Enterprise number validation
+├── components/                   # React components
+├── scripts/                      # CLI utilities
+└── docs/                         # Reference documentation
+```
 
-### Data Files
-The ZIP archives contain these CSV files:
+## Database Architecture
 
-1. **meta.csv**: Metadata (snapshot date, extract timestamp, version, extract number)
-2. **code.csv**: Code descriptions used in other files (multi-language: NL, FR, DE, EN)
-3. **enterprise.csv**: One line per enterprise with enterprise number, status, juridical form, start date
-4. **establishment.csv**: One line per establishment with establishment number, start date, parent enterprise number
-5. **denomination.csv**: Names (legal, commercial, abbreviations) for enterprises/establishments
-6. **address.csv**: Addresses (legal persons: seat + optional branch; natural persons: establishment addresses only)
-7. **contact.csv**: Contact details (phone, email, web) for enterprises/establishments
-8. **activity.csv**: Economic activities using NACE codes (2003, 2008, or 2025 versions)
-9. **branch.csv**: Branch offices of foreign entities in Belgium
+### Tables (11 total)
 
-### Key Identifiers
-- **Enterprise Number**: Format `9999.999.999` (10 digits with dots)
-- **Establishment Number**: Format `9.999.999.999` (10 digits with leading single digit)
+| Table | Rows | Purpose |
+|-------|------|---------|
+| enterprises | 1.9M | Core entities (denormalized primary name) |
+| establishments | 1.7M | Physical locations per enterprise |
+| activities | 36M | NACE codes (link to nace_codes) |
+| denominations | 3.3M | All business names |
+| addresses | 2.8M | Locations (60% of enterprises have one) |
+| contacts | 0.7M | Phone/email/web |
+| nace_codes | 7.3K | NACE code descriptions |
+| codes | 21.5K | Multilingual code descriptions |
+| branches | ~K | Foreign entity branches |
+| import_jobs | - | Import tracking |
+| export_jobs | - | Export tracking |
 
-### Update File Logic
-Update files use a delete-then-insert pattern:
-1. Files ending in `_delete.csv` contain entity/establishment numbers to remove
-2. Files ending in `_insert.csv` contain complete replacement data (not just changes)
-3. Process in order: delete first, then insert
+### Temporal Tracking
 
-Example: If an enterprise's name changes, `denomination_delete.csv` contains the enterprise number, and `denomination_insert.csv` contains ALL current names for that enterprise (not just the changed one).
+All data tables use composite primary keys for temporal versioning:
+- `_snapshot_date` - Date of the KBO extract
+- `_extract_number` - Sequential extract number
+- `_is_current` - Boolean flag for current records
+- `_deleted_at_extract` - When record was deleted (if applicable)
 
-## Data Characteristics
+Point-in-time queries are supported via `buildTemporalFilter()` and related helpers in `lib/motherduck/temporal-query.ts`.
 
-- **Scope**: Only active enterprises and active establishments
-- **History**: No historical data - only current state as of snapshot date
-- **Languages**: Multi-language support (Dutch, French, German, English) for codes and addresses
-- **Updates**: Full file monthly (first Sunday), update files daily
+### Key Data Characteristics
+
+- **40% of enterprises have NO address** (natural persons)
+- **35% have NO MAIN activity** (schema allows NULL)
+- **Daily updates are tiny** (~156 changes/day, 0.0008% of dataset)
+- **Entity numbers have dots**: `0588.926.194` (enterprise), `2.092.820.431` (establishment)
+
+## Development Patterns
+
+### Running Database Queries
+
+When investigating data in Motherduck:
+
+1. **Use the template script**:
+   ```bash
+   cp scripts/_template-query.ts scripts/investigate-xyz.ts
+   # Edit the query logic
+   npx tsx scripts/investigate-xyz.ts [args]
+   # Delete when done
+   ```
+
+2. **Why**: The `lib/motherduck` functions require proper environment loading that doesn't work in inline scripts.
+
+3. **Column names**: Use underscores (e.g., `_extract_number`, `enterprise_number`, `_is_current`)
+
+### API Route Pattern
+
+```typescript
+// All admin routes follow this pattern
+export async function GET(request: Request) {
+  // 1. Check auth
+  const authError = await checkAdminAccess()
+  if (authError) return authError
+
+  // 2. Connect to database
+  const connection = await connectMotherduck()
+
+  try {
+    // 3. Execute query
+    const result = await executeQuery(connection, sql)
+    return NextResponse.json(result)
+  } finally {
+    // 4. Always close connection
+    await closeMotherduck(connection)
+  }
+}
+```
+
+### Temporal Query Pattern
+
+```typescript
+// Build filter for current or point-in-time
+const filter = extractNumber
+  ? { type: 'point-in-time', extractNumber, snapshotDate }
+  : { type: 'current' }
+
+// Use with temporal query builders
+const whereClause = buildTemporalFilter(filter, 'e') // 'e' is table alias
+```
+
+### Import Workflow
+
+Imports use Restate durable workflows (`lib/restate/kbo-import-service.ts`):
+
+1. **Download** - Fetch ZIP from KBO portal with auth
+2. **Prepare** - Parse metadata, create import job record
+3. **Process** - Transform CSV → Motherduck with batched inserts
+4. **Finalize** - Resolve primary names, cleanup
+
+Progress is tracked in the `import_jobs` table and visible in the admin UI.
+
+## Environment Variables
+
+```bash
+# Required
+MOTHERDUCK_TOKEN=your_token
+MOTHERDUCK_DATABASE=newagekbo
+CLERK_SECRET_KEY=sk_...
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_...
+
+# KBO Portal (for imports)
+KBO_USERNAME=your_username
+KBO_PASSWORD=your_password
+
+# Restate (durable workflows)
+RESTATE_INGRESS_URL=http://localhost:8080
+RESTATE_ADMIN_URL=http://localhost:9070
+```
+
+## Common Tasks
+
+### Adding a new API endpoint
+
+1. Create route in `app/api/` following the auth pattern above
+2. Add types to `lib/types/` if needed
+3. Add database query helpers to `lib/motherduck/` if complex
+
+### Modifying enterprise detail page
+
+- Data fetching: `lib/motherduck/enterprise-detail.ts`
+- API route: `app/api/enterprises/[number]/route.ts`
+- UI: `app/admin/browse/[number]/page.tsx`
+- Types: `app/api/enterprises/[number]/route.ts` (interfaces)
+
+### Adding new database queries
+
+- Use `executeQuery<T>()` from `lib/motherduck/index.ts`
+- For temporal queries, use helpers from `lib/motherduck/temporal-query.ts`
+- Join with `codes` table for multilingual descriptions
 
 ## Reference Documentation
 
-Technical specifications are available in:
-- `/specs/KBOCookbook_EN.md` - English version (R018.00)
-- `/specs/KBOCookbook_NL.md` - Dutch version (R018.00)
+- **[docs/DATA_ANALYSIS.md](docs/DATA_ANALYSIS.md)** - Data analysis and design decisions
+- **[docs/IMPLEMENTATION_GUIDE.md](docs/IMPLEMENTATION_GUIDE.md)** - Technical implementation details
+- **[docs/MOTHERDUCK_SETUP.md](docs/MOTHERDUCK_SETUP.md)** - Database setup
+- **[specs/KBOCookbook_EN.md](specs/KBOCookbook_EN.md)** - Official KBO specification
 
-These specifications were extracted and translated from the official PDF: https://economie.fgov.be/sites/default/files/Files/Entreprises/KBO/Cookbook-KBO-Open-Data.pdf
+## KBO Open Data Structure
 
-## Future Development
+The KBO Open Data is provided as monthly full files and daily update files from https://kbopub.economie.fgov.be/kbo-open-data.
 
-When building tools for this project, consider:
-- CSV parsing with proper handling of quoted fields and null values
-- Multi-language support for code descriptions
-- Efficient processing of large datasets (full database contains all Belgian enterprises)
-- Relational data modeling (enterprises → establishments → addresses/activities/contacts)
-- Update file processing with delete-then-insert pattern
+### CSV Files in ZIP Archives
 
-## Project Vision: KBO for the New Age
+1. **meta.csv** - Metadata (snapshot date, extract number)
+2. **code.csv** - Code descriptions (multi-language)
+3. **enterprise.csv** - Enterprise records
+4. **establishment.csv** - Establishment records
+5. **denomination.csv** - Business names
+6. **address.csv** - Physical addresses
+7. **contact.csv** - Contact details
+8. **activity.csv** - NACE activity codes
+9. **branch.csv** - Foreign entity branches
 
-- The goal of this project is to provide a more modern experience for people who want to build an application on top of the KBO Open Data set.
-- The target deployment for this project is a Vercel Next.js webapp running against a Motherduck hosted database (https://motherduck.com/docs/sql-reference/).
-- The admin application automatically fetches KBO updates from https://kbopub.economie.fgov.be/kbo-open-data/affiliation/xml/?files (username + password auth), and maintains a live database which tracks the data updates in these files.
-- The database schema must allow for time-based navigation, making it possible to build analytical queries comparing time periods. Timestamps are maintained on a day-based granularity and can be found in meta.csv for data updates.
-- The application takes specific care for supporting the codetables defined in code.csv and the multi-lingual character of the dataset.
-- The central entity of the dataset is the enterprise, which has an optional subhierarchy of establishments.
+### Update File Pattern
 
-## Database Queries
+Daily updates use delete-then-insert:
+- `*_delete.csv` - Entity numbers to mark as deleted
+- `*_insert.csv` - Complete replacement data (not diffs)
 
-**IMPORTANT**: When you need to run investigative database queries against MotherDuck:
+### Identifiers
 
-1. **Always use the template script**: Copy `scripts/_template-query.ts` to a new file
-2. **Never try inline scripts**: The `lib/motherduck` functions don't work in inline tsx scripts due to environment loading issues
-3. **Follow the pattern**:
-   ```bash
-   cp scripts/_template-query.ts scripts/investigate-xyz.ts
-   # Edit the query logic in the new file
-   npx tsx scripts/investigate-xyz.ts [args]
-   # Delete the script when done
-   ```
-4. **Template benefits**: Handles dotenv loading, DuckDB connection setup, and proper result iteration
-5. **Remember**: Column names in the database often have underscores (e.g., `_extract_number`, not `extract_number`)
-
-This pattern is currently required - if a better approach is found to avoid script creation, update this section.
-
-## Considerations
-
-- Always check size of sample CSV files prior to reading them, some files are very large!
-- The sampledata directory contains a local copy of a monthly (full) dataset, and a daily increment.
-
-### Admin webapp
-- Allows to list & fetch datasets from the KBO Open Data service and saves them in a landing zone on Motherduck
-- Triggers data manipulation actions, preferably running in Motherduck as SQL jobs (i.e. treat as little data locally as possible)
-- UX is decoupled from the backend: the backend operations should also be programmatically accessible via https://vercel.com/docs/cron-jobs
-- Allows to look at import jobs
-- Allows to browse the resulting database
+- **Enterprise**: `9999.999.999` (10 digits with dots)
+- **Establishment**: `9.999.999.999` (10 digits, leading single digit)
