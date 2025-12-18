@@ -137,7 +137,7 @@ export async function fetchEnterpriseDetail(
   }
 
   // Fetch all related data in parallel
-  const [denominations, addresses, activities, contacts, establishments] = await Promise.all([
+  const [denominations, addresses, activities, contacts, establishments, establishmentActivities] = await Promise.all([
     // Denominations
     executeQuery<{
       language: string
@@ -192,10 +192,12 @@ export async function fetchEnterpriseDetail(
       )
     ),
 
-    // Activities with NACE descriptions - needs custom query due to JOIN
+    // Activities with NACE descriptions and activity group descriptions - needs custom query due to JOINs
     executeQuery<{
       entity_number: string
       activity_group: string
+      activity_group_description_nl: string | null
+      activity_group_description_fr: string | null
       nace_version: string
       nace_code: string
       nace_description_nl: string | null
@@ -212,6 +214,8 @@ export async function fetchEnterpriseDetail(
             SELECT
               a.entity_number,
               a.activity_group,
+              c_ag_nl.description as activity_group_description_nl,
+              c_ag_fr.description as activity_group_description_fr,
               a.nace_version,
               a.nace_code,
               n.description_nl as nace_description_nl,
@@ -220,6 +224,10 @@ export async function fetchEnterpriseDetail(
             FROM activities a
             LEFT JOIN nace_codes n ON n.nace_version = a.nace_version
               AND n.nace_code = a.nace_code
+            LEFT JOIN codes c_ag_nl ON c_ag_nl.category = 'ActivityGroup'
+              AND c_ag_nl.code = a.activity_group AND c_ag_nl.language = 'NL'
+            LEFT JOIN codes c_ag_fr ON c_ag_fr.category = 'ActivityGroup'
+              AND c_ag_fr.code = a.activity_group AND c_ag_fr.language = 'FR'
             WHERE ${baseWhere}
             ORDER BY a.nace_version DESC, a.classification, a.nace_code
           `.trim()
@@ -229,6 +237,8 @@ export async function fetchEnterpriseDetail(
         return buildPointInTimeQuery(
           `entity_number,
           activity_group,
+          activity_group_description_nl,
+          activity_group_description_fr,
           nace_version,
           nace_code,
           nace_description_nl,
@@ -237,11 +247,17 @@ export async function fetchEnterpriseDetail(
           `(
             SELECT
               a.*,
+              c_ag_nl.description as activity_group_description_nl,
+              c_ag_fr.description as activity_group_description_fr,
               n.description_nl as nace_description_nl,
               n.description_fr as nace_description_fr
             FROM activities a
             LEFT JOIN nace_codes n ON n.nace_version = a.nace_version
               AND n.nace_code = a.nace_code
+            LEFT JOIN codes c_ag_nl ON c_ag_nl.category = 'ActivityGroup'
+              AND c_ag_nl.code = a.activity_group AND c_ag_nl.language = 'NL'
+            LEFT JOIN codes c_ag_fr ON c_ag_fr.category = 'ActivityGroup'
+              AND c_ag_fr.code = a.activity_group AND c_ag_fr.language = 'FR'
             WHERE ${baseWhere}
           )`,
           '1=1',
@@ -303,6 +319,80 @@ export async function fetchEnterpriseDetail(
         )
       })()
     ),
+
+    // Establishment activities - fetch all activities for establishments of this enterprise
+    executeQuery<{
+      entity_number: string
+      activity_group: string
+      activity_group_description_nl: string | null
+      activity_group_description_fr: string | null
+      nace_version: string
+      nace_code: string
+      nace_description_nl: string | null
+      nace_description_fr: string | null
+      classification: string
+    }>(
+      connection,
+      (() => {
+        const estTemporalWhere = buildTemporalFilter(filter, 'est')
+        const actTemporalWhere = buildTemporalFilter(filter, 'a')
+
+        if (filter.type === 'current') {
+          return `
+            SELECT
+              a.entity_number,
+              a.activity_group,
+              c_ag_nl.description as activity_group_description_nl,
+              c_ag_fr.description as activity_group_description_fr,
+              a.nace_version,
+              a.nace_code,
+              n.description_nl as nace_description_nl,
+              n.description_fr as nace_description_fr,
+              a.classification
+            FROM activities a
+            INNER JOIN establishments est ON a.entity_number = est.establishment_number
+            LEFT JOIN nace_codes n ON n.nace_version = a.nace_version AND n.nace_code = a.nace_code
+            LEFT JOIN codes c_ag_nl ON c_ag_nl.category = 'ActivityGroup'
+              AND c_ag_nl.code = a.activity_group AND c_ag_nl.language = 'NL'
+            LEFT JOIN codes c_ag_fr ON c_ag_fr.category = 'ActivityGroup'
+              AND c_ag_fr.code = a.activity_group AND c_ag_fr.language = 'FR'
+            WHERE est.enterprise_number = '${enterpriseNumber}'
+              AND ${estTemporalWhere}
+              AND ${actTemporalWhere}
+            ORDER BY a.entity_number, a.activity_group, a.nace_version DESC, a.nace_code
+          `.trim()
+        }
+
+        // For point-in-time, we need a more complex query
+        return `
+          WITH current_establishments AS (
+            SELECT DISTINCT establishment_number
+            FROM establishments est
+            WHERE enterprise_number = '${enterpriseNumber}'
+              AND ${estTemporalWhere}
+          )
+          SELECT
+            a.entity_number,
+            a.activity_group,
+            c_ag_nl.description as activity_group_description_nl,
+            c_ag_fr.description as activity_group_description_fr,
+            a.nace_version,
+            a.nace_code,
+            n.description_nl as nace_description_nl,
+            n.description_fr as nace_description_fr,
+            a.classification
+          FROM activities a
+          INNER JOIN current_establishments ce ON a.entity_number = ce.establishment_number
+          LEFT JOIN nace_codes n ON n.nace_version = a.nace_version AND n.nace_code = a.nace_code
+          LEFT JOIN codes c_ag_nl ON c_ag_nl.category = 'ActivityGroup'
+            AND c_ag_nl.code = a.activity_group AND c_ag_nl.language = 'NL'
+          LEFT JOIN codes c_ag_fr ON c_ag_fr.category = 'ActivityGroup'
+            AND c_ag_fr.code = a.activity_group AND c_ag_fr.language = 'FR'
+          WHERE ${actTemporalWhere}
+          ORDER BY a.entity_number, a.activity_group, a.nace_version DESC, a.nace_code
+        `.trim()
+      })()
+    ),
   ])
 
   const detail: EnterpriseDetail = {
@@ -352,6 +442,8 @@ export async function fetchEnterpriseDetail(
     activities: activities.map((a) => ({
       entityNumber: a.entity_number,
       activityGroup: a.activity_group,
+      activityGroupDescriptionNL: a.activity_group_description_nl,
+      activityGroupDescriptionFR: a.activity_group_description_fr,
       naceVersion: a.nace_version,
       naceCode: a.nace_code,
       naceDescriptionNL: a.nace_description_nl,
@@ -365,11 +457,29 @@ export async function fetchEnterpriseDetail(
       value: c.contact_value,
     })),
 
-    establishments: establishments.map((e) => ({
-      establishmentNumber: e.establishment_number,
-      startDate: e.start_date,
-      primaryName: e.commercial_name,
-    })),
+    establishments: establishments.map((e) => {
+      // Group establishment activities by establishment number
+      const estActivities = establishmentActivities
+        .filter((a) => a.entity_number === e.establishment_number)
+        .map((a) => ({
+          entityNumber: a.entity_number,
+          activityGroup: a.activity_group,
+          activityGroupDescriptionNL: a.activity_group_description_nl,
+          activityGroupDescriptionFR: a.activity_group_description_fr,
+          naceVersion: a.nace_version,
+          naceCode: a.nace_code,
+          naceDescriptionNL: a.nace_description_nl,
+          naceDescriptionFR: a.nace_description_fr,
+          classification: a.classification,
+        }))
+
+      return {
+        establishmentNumber: e.establishment_number,
+        startDate: e.start_date,
+        primaryName: e.commercial_name,
+        activities: estActivities,
+      }
+    }),
   }
 
   return detail

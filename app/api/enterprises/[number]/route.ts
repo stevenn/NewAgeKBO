@@ -54,6 +54,8 @@ export interface Address {
 export interface Activity {
   entityNumber: string
   activityGroup: string
+  activityGroupDescriptionNL: string | null
+  activityGroupDescriptionFR: string | null
   naceVersion: string
   naceCode: string
   naceDescriptionNL: string | null
@@ -71,6 +73,7 @@ export interface Establishment {
   establishmentNumber: string
   startDate: string | null
   primaryName: string | null
+  activities: Activity[]
 }
 
 export async function GET(

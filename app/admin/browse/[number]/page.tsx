@@ -686,64 +686,102 @@ export default function EnterpriseDetailPage() {
                 </div>
               )}
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {/* Combine baseline (displayDetail), added activities, and removed activities, grouped by version */}
-              {(Object.entries(
-                [...displayDetail.activities, ...(comparison?.activities.added || []), ...(comparison?.activities.removed || [])].reduce((acc, activity) => {
-                  const version = activity.naceVersion
-                  if (!acc[version]) acc[version] = []
-                  acc[version].push(activity)
-                  return acc
-                }, {} as Record<string, Array<typeof displayDetail.activities[0]>>)
-              ) as [string, Array<typeof displayDetail.activities[0]>][])
-                .sort(([a], [b]) => b.localeCompare(a)) // Sort versions descending (2025, 2008, 2003)
-                .map(([version, activities]) => (
-                  <div key={version}>
-                    <h3 className="text-sm font-semibold text-gray-700 mb-2">
-                      NACE {version}
-                    </h3>
-                    <div className="space-y-1">
-                      {activities.map((activity: typeof displayDetail.activities[0], idx: number) => {
-                        const key = `${activity.activityGroup}-${activity.naceVersion}-${activity.naceCode}-${activity.classification}`
-                        const isRemoved = comparison?.activities.removed.some(
-                          (a: typeof activity) => `${a.activityGroup}-${a.naceVersion}-${a.naceCode}-${a.classification}` === key
-                        )
-                        const isAdded = comparison?.activities.added.some(
-                          (a: typeof activity) => `${a.activityGroup}-${a.naceVersion}-${a.naceCode}-${a.classification}` === key
-                        )
-                        return (
-                          <div
-                            key={idx}
-                            className={`flex flex-col text-sm py-1.5 border-b border-gray-100 last:border-0 ${
-                              isAdded ? 'bg-green-50 -mx-2 px-2 rounded' : isRemoved ? 'bg-red-50 -mx-2 px-2 rounded opacity-60' : ''
-                            }`}
-                          >
-                            <div className="flex items-center justify-between">
-                              <span className={`font-mono font-medium text-gray-900 ${isRemoved ? 'line-through' : ''}`}>
-                                {activity.naceCode}
-                              </span>
-                              {isAdded && (
-                                <span className="text-xs bg-green-500 text-white px-1.5 py-0.5 rounded">New in selected</span>
-                              )}
-                              {isRemoved && (
-                                <span className="text-xs bg-red-500 text-white px-1.5 py-0.5 rounded">Removed in selected</span>
-                              )}
-                            </div>
-                            {(language === 'FR' ? activity.naceDescriptionFR : activity.naceDescriptionNL) && (
-                              <span className={`text-gray-700 text-xs mt-0.5 ${isRemoved ? 'line-through' : ''}`}>
-                                {language === 'FR' ? activity.naceDescriptionFR : activity.naceDescriptionNL}
-                              </span>
-                            )}
-                            <span className="text-gray-500 text-xs mt-0.5">
-                              {activity.classification} · {activity.activityGroup}
+            {/* Group activities by Activity Group first, then by NACE version */}
+            {(() => {
+              const allActivities = [...displayDetail.activities, ...(comparison?.activities.added || []), ...(comparison?.activities.removed || [])]
+
+              // Group by activity group
+              const groupedByAG = allActivities.reduce((acc, activity) => {
+                const ag = activity.activityGroup
+                if (!acc[ag]) acc[ag] = []
+                acc[ag].push(activity)
+                return acc
+              }, {} as Record<string, Array<typeof displayDetail.activities[0]>>)
+
+              return (
+                <div className="space-y-6">
+                  {(Object.entries(groupedByAG) as [string, Array<typeof displayDetail.activities[0]>][])
+                    .sort(([a], [b]) => a.localeCompare(b)) // Sort by activity group (001, 002, ...)
+                    .map(([ag, agActivities]) => {
+                      // Within each AG, group by NACE version
+                      const groupedByVersion = agActivities.reduce((acc, activity) => {
+                        const version = activity.naceVersion
+                        if (!acc[version]) acc[version] = []
+                        acc[version].push(activity)
+                        return acc
+                      }, {} as Record<string, Array<typeof displayDetail.activities[0]>>)
+
+                      // Get the description from the first activity in this group
+                      const agDescription = language === 'FR'
+                        ? agActivities[0]?.activityGroupDescriptionFR
+                        : agActivities[0]?.activityGroupDescriptionNL
+
+                      return (
+                        <div key={ag} className="border-b border-gray-200 pb-4 last:border-0 last:pb-0">
+                          <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                            <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold ${
+                              ag === '001' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-700'
+                            }`}>
+                              {ag}
                             </span>
+                            {agDescription || `Activity Group ${ag}`}
+                          </h3>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pl-10">
+                            {(Object.entries(groupedByVersion) as [string, Array<typeof displayDetail.activities[0]>][])
+                              .sort(([a], [b]) => b.localeCompare(a)) // Sort versions descending (2025, 2008, 2003)
+                              .map(([version, activities]) => (
+                                <div key={version}>
+                                  <h4 className="text-xs font-medium text-gray-500 mb-2">
+                                    NACE {version}
+                                  </h4>
+                                  <div className="space-y-1">
+                                    {activities.map((activity: typeof displayDetail.activities[0], idx: number) => {
+                                      const key = `${activity.activityGroup}-${activity.naceVersion}-${activity.naceCode}-${activity.classification}`
+                                      const isRemoved = comparison?.activities.removed.some(
+                                        (a: typeof activity) => `${a.activityGroup}-${a.naceVersion}-${a.naceCode}-${a.classification}` === key
+                                      )
+                                      const isAdded = comparison?.activities.added.some(
+                                        (a: typeof activity) => `${a.activityGroup}-${a.naceVersion}-${a.naceCode}-${a.classification}` === key
+                                      )
+                                      return (
+                                        <div
+                                          key={idx}
+                                          className={`flex flex-col text-sm py-1.5 border-b border-gray-100 last:border-0 ${
+                                            isAdded ? 'bg-green-50 -mx-2 px-2 rounded' : isRemoved ? 'bg-red-50 -mx-2 px-2 rounded opacity-60' : ''
+                                          }`}
+                                        >
+                                          <div className="flex items-center justify-between">
+                                            <span className={`font-mono font-medium text-gray-900 ${isRemoved ? 'line-through' : ''}`}>
+                                              {activity.naceCode}
+                                            </span>
+                                            {isAdded && (
+                                              <span className="text-xs bg-green-500 text-white px-1.5 py-0.5 rounded">New</span>
+                                            )}
+                                            {isRemoved && (
+                                              <span className="text-xs bg-red-500 text-white px-1.5 py-0.5 rounded">Removed</span>
+                                            )}
+                                          </div>
+                                          {(language === 'FR' ? activity.naceDescriptionFR : activity.naceDescriptionNL) && (
+                                            <span className={`text-gray-700 text-xs mt-0.5 ${isRemoved ? 'line-through' : ''}`}>
+                                              {language === 'FR' ? activity.naceDescriptionFR : activity.naceDescriptionNL}
+                                            </span>
+                                          )}
+                                          <span className="text-gray-500 text-xs mt-0.5">
+                                            {activity.classification}
+                                          </span>
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                </div>
+                              ))}
                           </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                ))}
-            </div>
+                        </div>
+                      )
+                    })}
+                </div>
+              )
+            })()}
           </div>
         )}
 
@@ -849,81 +887,83 @@ export default function EnterpriseDetailPage() {
                 </div>
               )}
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50 border-b">
-                  <tr>
-                    <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">
-                      Establishment Number
-                    </th>
-                    <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">
-                      Name
-                    </th>
-                    <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">
-                      Start Date
-                    </th>
-                    <th className="text-left px-4 py-3 text-sm font-medium text-gray-600">
-                      Status
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {/* Show removed establishments from previous snapshot */}
-                  {comparison && comparison.establishments.removed.length > 0 && (
-                    <>
-                      {comparison.establishments.removed.map((est: typeof displayDetail.establishments[0]) => (
-                        <tr key={`removed-${est.establishmentNumber}`} className="hover:bg-gray-50 bg-red-50 opacity-60">
-                          <td className="px-4 py-3 text-sm font-mono line-through">
-                            {est.establishmentNumber}
-                          </td>
-                          <td className="px-4 py-3 text-sm line-through">{est.primaryName || '-'}</td>
-                          <td className="px-4 py-3 text-sm line-through">{est.startDate || '-'}</td>
-                          <td className="px-4 py-3 text-sm">
-                            <span className="text-xs bg-red-500 text-white px-2 py-1 rounded">Removed in selected</span>
-                          </td>
-                        </tr>
-                      ))}
-                    </>
-                  )}
-                  {/* Show unchanged establishments from selected snapshot */}
-                  {displayDetail.establishments.map((est) => {
-                    const isAdded = comparison?.establishments.added.some(
-                      (e: typeof est) => e.establishmentNumber === est.establishmentNumber
-                    )
-                    // Don't show if it's in the "added" list (will be shown separately below)
-                    if (isAdded) return null
+            <div className="space-y-4">
+              {/* Show removed establishments from previous snapshot */}
+              {comparison && comparison.establishments.removed.length > 0 && (
+                <>
+                  {comparison.establishments.removed.map((est: typeof displayDetail.establishments[0]) => (
+                    <div key={`removed-${est.establishmentNumber}`} className="border rounded-lg p-4 bg-red-50 opacity-60">
+                      <div className="flex items-start justify-between mb-2">
+                        <div>
+                          <span className="font-mono text-sm font-medium line-through">{est.establishmentNumber}</span>
+                          {est.primaryName && <span className="ml-3 text-sm line-through">{est.primaryName}</span>}
+                        </div>
+                        <span className="text-xs bg-red-500 text-white px-2 py-1 rounded">Removed</span>
+                      </div>
+                      {est.startDate && <p className="text-xs text-gray-500 line-through">Started: {est.startDate}</p>}
+                    </div>
+                  ))}
+                </>
+              )}
+              {/* Show establishments from selected snapshot */}
+              {displayDetail.establishments.map((est) => {
+                const isAdded = comparison?.establishments.added.some(
+                  (e: typeof est) => e.establishmentNumber === est.establishmentNumber
+                )
 
-                    return (
-                      <tr key={est.establishmentNumber} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 text-sm font-mono">{est.establishmentNumber}</td>
-                        <td className="px-4 py-3 text-sm">{est.primaryName || '-'}</td>
-                        <td className="px-4 py-3 text-sm">{est.startDate || '-'}</td>
-                        <td className="px-4 py-3 text-sm"></td>
-                      </tr>
-                    )
-                  })}
-                  {/* Show added establishments from selected snapshot */}
-                  {comparison && comparison.establishments.added.length > 0 && (
-                    <>
-                      {comparison.establishments.added.map((est: typeof displayDetail.establishments[0]) => (
-                        <tr
-                          key={`added-${est.establishmentNumber}`}
-                          className="hover:bg-gray-50 bg-green-50"
-                        >
-                          <td className="px-4 py-3 text-sm font-mono">
-                            {est.establishmentNumber}
-                          </td>
-                          <td className="px-4 py-3 text-sm">{est.primaryName || '-'}</td>
-                          <td className="px-4 py-3 text-sm">{est.startDate || '-'}</td>
-                          <td className="px-4 py-3 text-sm">
-                            <span className="text-xs bg-green-500 text-white px-2 py-1 rounded">New in selected</span>
-                          </td>
-                        </tr>
-                      ))}
-                    </>
-                  )}
-                </tbody>
-              </table>
+                // Group activities by activity group
+                const activitiesByAG = est.activities.reduce((acc, activity) => {
+                  const ag = activity.activityGroup
+                  if (!acc[ag]) acc[ag] = []
+                  acc[ag].push(activity)
+                  return acc
+                }, {} as Record<string, typeof est.activities>)
+
+                return (
+                  <div
+                    key={est.establishmentNumber}
+                    className={`border rounded-lg p-4 ${isAdded ? 'bg-green-50' : 'bg-white'}`}
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <div>
+                        <span className="font-mono text-sm font-medium">{est.establishmentNumber}</span>
+                        {est.primaryName && <span className="ml-3 text-sm font-medium">{est.primaryName}</span>}
+                      </div>
+                      {isAdded && <span className="text-xs bg-green-500 text-white px-2 py-1 rounded">New</span>}
+                    </div>
+                    {est.startDate && <p className="text-xs text-gray-500 mb-3">Started: {est.startDate}</p>}
+
+                    {/* Establishment Activities */}
+                    {est.activities.length > 0 && (
+                      <div className="mt-3 pt-3 border-t border-gray-200">
+                        <p className="text-xs font-medium text-gray-600 mb-2">Activities ({est.activities.length})</p>
+                        <div className="space-y-2">
+                          {Object.entries(activitiesByAG)
+                            .sort(([a], [b]) => a.localeCompare(b))
+                            .map(([ag, agActivities]) => {
+                              const agDescription = language === 'FR'
+                                ? agActivities[0]?.activityGroupDescriptionFR
+                                : agActivities[0]?.activityGroupDescriptionNL
+                              return (
+                                <div key={ag} className="text-xs">
+                                  <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold mr-2 ${
+                                    ag === '001' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-700'
+                                  }`}>
+                                    {ag}
+                                  </span>
+                                  <span className="text-gray-600">{agDescription}</span>
+                                  <span className="text-gray-400 ml-2">
+                                    ({agActivities.map(a => a.naceCode).join(', ')})
+                                  </span>
+                                </div>
+                              )
+                            })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           </div>
         )}
