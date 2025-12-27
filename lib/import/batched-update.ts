@@ -627,7 +627,7 @@ async function calculateProgress(
 
 function buildEnterpriseInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
   return `
-    INSERT OR REPLACE INTO enterprises (
+    INSERT INTO enterprises (
       enterprise_number, status, juridical_situation, type_of_enterprise,
       juridical_form, juridical_form_cac, start_date,
       primary_name, primary_name_language, primary_name_nl, primary_name_fr, primary_name_de,
@@ -644,12 +644,13 @@ function buildEnterpriseInsert(stagingTable: string, jobId: string, batch: numbe
       AND operation = 'insert'
       AND batch_number = ${batch}
       AND processed = false
+    ON CONFLICT DO NOTHING
   `
 }
 
 function buildEstablishmentInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
   return `
-    INSERT OR REPLACE INTO establishments (
+    INSERT INTO establishments (
       establishment_number, enterprise_number, start_date,
       _snapshot_date, _extract_number, _is_current
     )
@@ -661,12 +662,13 @@ function buildEstablishmentInsert(stagingTable: string, jobId: string, batch: nu
       AND operation = 'insert'
       AND batch_number = ${batch}
       AND processed = false
+    ON CONFLICT DO NOTHING
   `
 }
 
 function buildBranchInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
   return `
-    INSERT OR REPLACE INTO branches (
+    INSERT INTO branches (
       id, enterprise_number, start_date,
       _snapshot_date, _extract_number, _is_current
     )
@@ -678,12 +680,13 @@ function buildBranchInsert(stagingTable: string, jobId: string, batch: number, s
       AND operation = 'insert'
       AND batch_number = ${batch}
       AND processed = false
+    ON CONFLICT DO NOTHING
   `
 }
 
 function buildActivityInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
   return `
-    INSERT OR REPLACE INTO activities (
+    INSERT INTO activities (
       id, entity_number, entity_type, activity_group, nace_version, nace_code, classification,
       _snapshot_date, _extract_number, _is_current
     )
@@ -701,12 +704,13 @@ function buildActivityInsert(stagingTable: string, jobId: string, batch: number,
       AND operation = 'insert'
       AND batch_number = ${batch}
       AND processed = false
+    ON CONFLICT DO NOTHING
   `
 }
 
 function buildAddressInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
   return `
-    INSERT OR REPLACE INTO addresses (
+    INSERT INTO addresses (
       id, entity_number, entity_type, type_of_address,
       country_nl, country_fr, zipcode, municipality_nl, municipality_fr,
       street_nl, street_fr, house_number, box, extra_address_info, date_striking_off,
@@ -727,12 +731,13 @@ function buildAddressInsert(stagingTable: string, jobId: string, batch: number, 
       AND operation = 'insert'
       AND batch_number = ${batch}
       AND processed = false
+    ON CONFLICT DO NOTHING
   `
 }
 
 function buildContactInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
   return `
-    INSERT OR REPLACE INTO contacts (
+    INSERT INTO contacts (
       id, entity_number, entity_type, entity_contact, contact_type, contact_value,
       _snapshot_date, _extract_number, _is_current
     )
@@ -750,12 +755,13 @@ function buildContactInsert(stagingTable: string, jobId: string, batch: number, 
       AND operation = 'insert'
       AND batch_number = ${batch}
       AND processed = false
+    ON CONFLICT DO NOTHING
   `
 }
 
 function buildDenominationInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
   return `
-    INSERT OR REPLACE INTO denominations (
+    INSERT INTO denominations (
       id, entity_number, entity_type, denomination_type, language, denomination,
       _snapshot_date, _extract_number, _is_current
     )
@@ -773,6 +779,7 @@ function buildDenominationInsert(stagingTable: string, jobId: string, batch: num
       AND operation = 'insert'
       AND batch_number = ${batch}
       AND processed = false
+    ON CONFLICT DO NOTHING
   `
 }
 
