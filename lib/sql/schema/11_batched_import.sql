@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS import_staging_enterprises (
   batch_number INTEGER NOT NULL,
   operation VARCHAR NOT NULL,               -- 'delete' or 'insert'
   processed BOOLEAN DEFAULT false,
+  row_sequence INTEGER NOT NULL,            -- CSV row order for deduplication (last row wins)
 
   -- Enterprise columns (matching enterprises table schema)
   enterprise_number VARCHAR NOT NULL,
@@ -86,6 +87,7 @@ CREATE TABLE IF NOT EXISTS import_staging_establishments (
   batch_number INTEGER NOT NULL,
   operation VARCHAR NOT NULL,
   processed BOOLEAN DEFAULT false,
+  row_sequence INTEGER NOT NULL,            -- CSV row order for deduplication (last row wins)
 
   -- Establishment columns (matching establishments table schema)
   establishment_number VARCHAR NOT NULL,
@@ -114,6 +116,7 @@ CREATE TABLE IF NOT EXISTS import_staging_denominations (
   batch_number INTEGER NOT NULL,
   operation VARCHAR NOT NULL,
   processed BOOLEAN DEFAULT false,
+  row_sequence INTEGER NOT NULL,            -- CSV row order for deduplication (last row wins)
 
   -- Denomination columns (from CSV: EntityNumber, Language, TypeOfDenomination, Denomination)
   -- Note: entity_type NOT in CSV - computed during INSERT based on EntityNumber format
@@ -145,6 +148,7 @@ CREATE TABLE IF NOT EXISTS import_staging_addresses (
   batch_number INTEGER NOT NULL,
   operation VARCHAR NOT NULL,
   processed BOOLEAN DEFAULT false,
+  row_sequence INTEGER NOT NULL,            -- CSV row order for deduplication (last row wins)
 
   -- Address columns (from CSV: EntityNumber, TypeOfAddress, CountryNL, CountryFR, ...)
   -- Note: entity_type NOT in CSV - computed during INSERT based on EntityNumber format
@@ -185,6 +189,7 @@ CREATE TABLE IF NOT EXISTS import_staging_contacts (
   batch_number INTEGER NOT NULL,
   operation VARCHAR NOT NULL,
   processed BOOLEAN DEFAULT false,
+  row_sequence INTEGER NOT NULL,            -- CSV row order for deduplication (last row wins)
 
   -- Contact columns (from CSV: EntityNumber, EntityContact, ContactType, Value)
   -- Note: entity_type NOT in CSV - computed during INSERT based on EntityNumber format
@@ -215,6 +220,7 @@ CREATE TABLE IF NOT EXISTS import_staging_activities (
   batch_number INTEGER NOT NULL,
   operation VARCHAR NOT NULL,
   processed BOOLEAN DEFAULT false,
+  row_sequence INTEGER NOT NULL,            -- CSV row order for deduplication (last row wins)
 
   -- Activity columns (from CSV: EntityNumber, ActivityGroup, NaceVersion, NaceCode, Classification)
   -- Note: entity_type NOT in CSV - computed during INSERT based on EntityNumber format
@@ -248,6 +254,7 @@ CREATE TABLE IF NOT EXISTS import_staging_branches (
   batch_number INTEGER NOT NULL,
   operation VARCHAR NOT NULL,
   processed BOOLEAN DEFAULT false,
+  row_sequence INTEGER NOT NULL,            -- CSV row order for deduplication (last row wins)
 
   -- Branch columns (matching branches table schema)
   id VARCHAR NOT NULL,

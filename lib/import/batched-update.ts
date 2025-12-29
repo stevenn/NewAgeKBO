@@ -209,7 +209,11 @@ function calculateBatchCount(recordCount: number, batchSize: number): number {
 }
 
 /**
- * Populate a staging table with CSV records, assigning batch numbers
+ * Populate a staging table with CSV records, assigning batch numbers and row sequence
+ *
+ * row_sequence tracks the original CSV row order (1-based) so that when duplicates
+ * exist in the CSV, we can use the last occurrence (highest row_sequence) as the
+ * authoritative record during INSERT operations.
  */
 async function populateStagingTable(
   db: DuckDBConnection,
@@ -227,9 +231,9 @@ async function populateStagingTable(
   const dbColumns = csvColumns.map(col => csvColumnToDbColumn(col))
 
   // Build column list for staging table
-  // Order: job_id, batch_number, operation, processed=false(default), ...data columns, created_at=now(default)
-  // We only specify the columns we're providing values for
-  const stagingColumns = ['job_id', 'batch_number', 'operation', ...dbColumns]
+  // Order: job_id, batch_number, operation, row_sequence, ...data columns
+  // processed=false and created_at=now are defaults
+  const stagingColumns = ['job_id', 'batch_number', 'operation', 'row_sequence', ...dbColumns]
 
   // Build VALUES for all records
   const values: string[] = []
@@ -237,6 +241,7 @@ async function populateStagingTable(
   for (let i = 0; i < records.length; i++) {
     const record = records[i]
     const batchNumber = Math.floor(i / batchSize) + 1
+    const rowSequence = i + 1  // 1-based row sequence from CSV
 
     const recordValues = csvColumns.map(col => {
       const val = record[col]
@@ -254,7 +259,7 @@ async function populateStagingTable(
       return `'${val.replace(/'/g, "''")}'`
     })
 
-    values.push(`('${jobId}', ${batchNumber}, '${operation}', ${recordValues.join(', ')})`)
+    values.push(`('${jobId}', ${batchNumber}, '${operation}', ${rowSequence}, ${recordValues.join(', ')})`)
   }
 
   const sql = `
@@ -626,6 +631,7 @@ async function calculateProgress(
 // Build INSERT SQL for specific table types (reused from daily-update.ts logic)
 
 function buildEnterpriseInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
+  // Use ROW_NUMBER to deduplicate - last row in CSV wins (highest row_sequence)
   return `
     INSERT INTO enterprises (
       enterprise_number, status, juridical_situation, type_of_enterprise,
@@ -639,16 +645,22 @@ function buildEnterpriseInsert(stagingTable: string, jobId: string, batch: numbe
       enterprise_number as primary_name, NULL as primary_name_language,
       NULL as primary_name_nl, NULL as primary_name_fr, NULL as primary_name_de,
       '${snapshotDate}'::DATE, ${extractNumber}, true
-    FROM ${stagingTable}
-    WHERE job_id = '${jobId}'
-      AND operation = 'insert'
-      AND batch_number = ${batch}
-      AND processed = false
+    FROM (
+      SELECT *,
+        ROW_NUMBER() OVER (PARTITION BY enterprise_number ORDER BY row_sequence DESC) as rn
+      FROM ${stagingTable}
+      WHERE job_id = '${jobId}'
+        AND operation = 'insert'
+        AND batch_number = ${batch}
+        AND processed = false
+    ) deduped
+    WHERE rn = 1
     ON CONFLICT DO NOTHING
   `
 }
 
 function buildEstablishmentInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
+  // Use ROW_NUMBER to deduplicate - last row in CSV wins (highest row_sequence)
   return `
     INSERT INTO establishments (
       establishment_number, enterprise_number, start_date,
@@ -657,16 +669,22 @@ function buildEstablishmentInsert(stagingTable: string, jobId: string, batch: nu
     SELECT
       establishment_number, enterprise_number, start_date,
       '${snapshotDate}'::DATE, ${extractNumber}, true
-    FROM ${stagingTable}
-    WHERE job_id = '${jobId}'
-      AND operation = 'insert'
-      AND batch_number = ${batch}
-      AND processed = false
+    FROM (
+      SELECT *,
+        ROW_NUMBER() OVER (PARTITION BY establishment_number ORDER BY row_sequence DESC) as rn
+      FROM ${stagingTable}
+      WHERE job_id = '${jobId}'
+        AND operation = 'insert'
+        AND batch_number = ${batch}
+        AND processed = false
+    ) deduped
+    WHERE rn = 1
     ON CONFLICT DO NOTHING
   `
 }
 
 function buildBranchInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
+  // Use ROW_NUMBER to deduplicate - last row in CSV wins (highest row_sequence)
   return `
     INSERT INTO branches (
       id, enterprise_number, start_date,
@@ -675,23 +693,29 @@ function buildBranchInsert(stagingTable: string, jobId: string, batch: number, s
     SELECT
       id, enterprise_number, start_date,
       '${snapshotDate}'::DATE, ${extractNumber}, true
-    FROM ${stagingTable}
-    WHERE job_id = '${jobId}'
-      AND operation = 'insert'
-      AND batch_number = ${batch}
-      AND processed = false
+    FROM (
+      SELECT *,
+        ROW_NUMBER() OVER (PARTITION BY id ORDER BY row_sequence DESC) as rn
+      FROM ${stagingTable}
+      WHERE job_id = '${jobId}'
+        AND operation = 'insert'
+        AND batch_number = ${batch}
+        AND processed = false
+    ) deduped
+    WHERE rn = 1
     ON CONFLICT DO NOTHING
   `
 }
 
 function buildActivityInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
-  // Use DISTINCT to deduplicate - KBO CSVs sometimes contain duplicate activity rows
+  // Use ROW_NUMBER to deduplicate - last row in CSV wins (highest row_sequence)
+  // Partition by all columns that form the computed id
   return `
     INSERT INTO activities (
       id, entity_number, entity_type, activity_group, nace_version, nace_code, classification,
       _snapshot_date, _extract_number, _is_current
     )
-    SELECT DISTINCT
+    SELECT
       entity_number || '_' || activity_group || '_' || nace_version || '_' || nace_code || '_' || classification as id,
       entity_number,
       CASE
@@ -700,16 +724,26 @@ function buildActivityInsert(stagingTable: string, jobId: string, batch: number,
       END as entity_type,
       activity_group, nace_version, nace_code, classification,
       '${snapshotDate}'::DATE, ${extractNumber}, true
-    FROM ${stagingTable}
-    WHERE job_id = '${jobId}'
-      AND operation = 'insert'
-      AND batch_number = ${batch}
-      AND processed = false
+    FROM (
+      SELECT *,
+        ROW_NUMBER() OVER (
+          PARTITION BY entity_number, activity_group, nace_version, nace_code, classification
+          ORDER BY row_sequence DESC
+        ) as rn
+      FROM ${stagingTable}
+      WHERE job_id = '${jobId}'
+        AND operation = 'insert'
+        AND batch_number = ${batch}
+        AND processed = false
+    ) deduped
+    WHERE rn = 1
     ON CONFLICT DO NOTHING
   `
 }
 
 function buildAddressInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
+  // Use ROW_NUMBER to deduplicate - last row in CSV wins (highest row_sequence)
+  // Partition by entity_number + type_of_address which form the computed id
   return `
     INSERT INTO addresses (
       id, entity_number, entity_type, type_of_address,
@@ -727,23 +761,32 @@ function buildAddressInsert(stagingTable: string, jobId: string, batch: number, 
       type_of_address, country_nl, country_fr, zipcode, municipality_nl, municipality_fr,
       street_nl, street_fr, house_number, box, extra_address_info, date_striking_off,
       '${snapshotDate}'::DATE, ${extractNumber}, true
-    FROM ${stagingTable}
-    WHERE job_id = '${jobId}'
-      AND operation = 'insert'
-      AND batch_number = ${batch}
-      AND processed = false
+    FROM (
+      SELECT *,
+        ROW_NUMBER() OVER (
+          PARTITION BY entity_number, type_of_address
+          ORDER BY row_sequence DESC
+        ) as rn
+      FROM ${stagingTable}
+      WHERE job_id = '${jobId}'
+        AND operation = 'insert'
+        AND batch_number = ${batch}
+        AND processed = false
+    ) deduped
+    WHERE rn = 1
     ON CONFLICT DO NOTHING
   `
 }
 
 function buildContactInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
-  // Use DISTINCT to deduplicate - KBO CSVs sometimes contain duplicate contact rows
+  // Use ROW_NUMBER to deduplicate - last row in CSV wins (highest row_sequence)
+  // Partition by all columns that form the computed id (entity_number, entity_contact, contact_type, contact_value)
   return `
     INSERT INTO contacts (
       id, entity_number, entity_type, entity_contact, contact_type, contact_value,
       _snapshot_date, _extract_number, _is_current
     )
-    SELECT DISTINCT
+    SELECT
       entity_number || '_' || entity_contact || '_' || contact_type || '_' || SUBSTRING(MD5(contact_value), 1, 8) as id,
       entity_number,
       CASE
@@ -752,23 +795,32 @@ function buildContactInsert(stagingTable: string, jobId: string, batch: number, 
       END as entity_type,
       entity_contact, contact_type, contact_value,
       '${snapshotDate}'::DATE, ${extractNumber}, true
-    FROM ${stagingTable}
-    WHERE job_id = '${jobId}'
-      AND operation = 'insert'
-      AND batch_number = ${batch}
-      AND processed = false
+    FROM (
+      SELECT *,
+        ROW_NUMBER() OVER (
+          PARTITION BY entity_number, entity_contact, contact_type, contact_value
+          ORDER BY row_sequence DESC
+        ) as rn
+      FROM ${stagingTable}
+      WHERE job_id = '${jobId}'
+        AND operation = 'insert'
+        AND batch_number = ${batch}
+        AND processed = false
+    ) deduped
+    WHERE rn = 1
     ON CONFLICT DO NOTHING
   `
 }
 
 function buildDenominationInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
-  // Use DISTINCT to deduplicate - KBO CSVs sometimes contain duplicate denomination rows
+  // Use ROW_NUMBER to deduplicate - last row in CSV wins (highest row_sequence)
+  // Partition by all columns that form the computed id (entity_number, denomination_type, language, denomination)
   return `
     INSERT INTO denominations (
       id, entity_number, entity_type, denomination_type, language, denomination,
       _snapshot_date, _extract_number, _is_current
     )
-    SELECT DISTINCT
+    SELECT
       entity_number || '_' || denomination_type || '_' || language || '_' || SUBSTRING(MD5(denomination), 1, 8) as id,
       entity_number,
       CASE
@@ -777,11 +829,19 @@ function buildDenominationInsert(stagingTable: string, jobId: string, batch: num
       END as entity_type,
       denomination_type, language, denomination,
       '${snapshotDate}'::DATE, ${extractNumber}, true
-    FROM ${stagingTable}
-    WHERE job_id = '${jobId}'
-      AND operation = 'insert'
-      AND batch_number = ${batch}
-      AND processed = false
+    FROM (
+      SELECT *,
+        ROW_NUMBER() OVER (
+          PARTITION BY entity_number, denomination_type, language, denomination
+          ORDER BY row_sequence DESC
+        ) as rn
+      FROM ${stagingTable}
+      WHERE job_id = '${jobId}'
+        AND operation = 'insert'
+        AND batch_number = ${batch}
+        AND processed = false
+    ) deduped
+    WHERE rn = 1
     ON CONFLICT DO NOTHING
   `
 }

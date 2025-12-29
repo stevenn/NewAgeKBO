@@ -155,11 +155,25 @@ const whereClause = buildTemporalFilter(filter, 'e') // 'e' is table alias
 Imports use Restate durable workflows (`lib/restate/kbo-import-service.ts`):
 
 1. **Download** - Fetch ZIP from KBO portal with auth
-2. **Prepare** - Parse metadata, create import job record
-3. **Process** - Transform CSV → Motherduck with batched inserts
-4. **Finalize** - Resolve primary names, cleanup
+2. **Prepare** - Parse metadata, populate staging tables with `row_sequence` tracking
+3. **Process** - Transform CSV → Motherduck with batched inserts (deduplication applied)
+4. **Finalize** - Resolve primary names, cleanup staging tables
 
 Progress is tracked in the `import_jobs` table and visible in the admin UI.
+
+#### Deduplication Strategy
+
+KBO CSV files occasionally contain duplicate rows for the same entity. The import system handles this using:
+
+- **`row_sequence` column** in staging tables tracks original CSV row order (1-based)
+- **ROW_NUMBER windowing** during INSERT selects only the last occurrence per entity
+- **`ON CONFLICT DO NOTHING`** as a safety net for any remaining edge cases
+
+This ensures that when an entity appears multiple times in an update file, the **last row wins** (highest `row_sequence`), preserving the most recent change.
+
+Key files:
+- `lib/import/batched-update.ts` - Core import logic with deduplication
+- `lib/sql/schema/11_batched_import.sql` - Staging table schemas
 
 ## Environment Variables
 
