@@ -685,12 +685,13 @@ function buildBranchInsert(stagingTable: string, jobId: string, batch: number, s
 }
 
 function buildActivityInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
+  // Use DISTINCT to deduplicate - KBO CSVs sometimes contain duplicate activity rows
   return `
     INSERT INTO activities (
       id, entity_number, entity_type, activity_group, nace_version, nace_code, classification,
       _snapshot_date, _extract_number, _is_current
     )
-    SELECT
+    SELECT DISTINCT
       entity_number || '_' || activity_group || '_' || nace_version || '_' || nace_code || '_' || classification as id,
       entity_number,
       CASE
@@ -736,12 +737,13 @@ function buildAddressInsert(stagingTable: string, jobId: string, batch: number, 
 }
 
 function buildContactInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
+  // Use DISTINCT to deduplicate - KBO CSVs sometimes contain duplicate contact rows
   return `
     INSERT INTO contacts (
       id, entity_number, entity_type, entity_contact, contact_type, contact_value,
       _snapshot_date, _extract_number, _is_current
     )
-    SELECT
+    SELECT DISTINCT
       entity_number || '_' || entity_contact || '_' || contact_type || '_' || SUBSTRING(MD5(contact_value), 1, 8) as id,
       entity_number,
       CASE
@@ -760,12 +762,13 @@ function buildContactInsert(stagingTable: string, jobId: string, batch: number, 
 }
 
 function buildDenominationInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
+  // Use DISTINCT to deduplicate - KBO CSVs sometimes contain duplicate denomination rows
   return `
     INSERT INTO denominations (
       id, entity_number, entity_type, denomination_type, language, denomination,
       _snapshot_date, _extract_number, _is_current
     )
-    SELECT
+    SELECT DISTINCT
       entity_number || '_' || denomination_type || '_' || language || '_' || SUBSTRING(MD5(denomination), 1, 8) as id,
       entity_number,
       CASE
