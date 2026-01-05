@@ -61,3 +61,11 @@ Thumbs.db
 specs/3rdpartyapi.json
 sampledata/*.zip
 specs/Technische-gebruikershandleiding-hergebruik-gegevens-KBO.pdf
+
+# Script output
+output/
+
+# One-off investigation scripts
+scripts/analyze-missing-registrations.ts
+scripts/cleanup-duplicates.ts
+scripts/investigate-discrepancies.ts

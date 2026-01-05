@@ -7,14 +7,32 @@
  * database state to identify discrepancies. Generates detailed report to help
  * decide whether to keep temporal history or start fresh.
  *
- * Usage: npx tsx scripts/validate-with-full-dump.ts /path/to/extracted/dump [--json]
+ * Usage: npx tsx scripts/validate-with-full-dump.ts /path/to/extracted/dump [--json] [--keep-temp] [--skip-import]
+ *
+ * Tables Compared:
+ * - enterprises (with detailed missing_in_db/orphaned_in_db)
+ * - establishments (with detailed missing_in_db/orphaned_in_db)
+ * - denominations (row count)
+ * - addresses (row count)
+ * - activities (row count)
+ * - contacts (row count)
+ * - branches (row count)
+ * - codes (row count + missing/orphaned/data_mismatch detection)
+ *
+ * Note: The dump is authoritative. Records in DB but not in dump are "orphaned"
+ * (should be deleted). Records in dump but not in DB are "missing" (should be added).
  *
  * Process:
- * 1. Import full dump CSVs into temporary tables (nov_enterprises, nov_activities, etc.)
- * 2. Compare current database state (_is_current=true) against temp tables
- * 3. Calculate discrepancy metrics (entity counts, missing entities, data mismatches)
- * 4. Generate comprehensive report with recommendation
- * 5. Clean up temporary tables
+ * 1. Import full dump CSVs into temporary tables (dump_*)
+ * 2. Compare current database state (_is_current=true) against dump tables
+ * 3. Calculate discrepancy metrics (entity counts, missing, orphaned, data mismatches)
+ * 4. Collect detailed discrepancies with both MotherDuck and KBO versions
+ * 5. Save discrepancies to JSON file in output/ directory for analysis
+ * 6. Generate comprehensive report with recommendation
+ * 7. Clean up temporary tables
+ *
+ * Output Files:
+ * - output/discrepancies-{extract_number}-{date}.json - Detailed discrepancy report
  *
  * Decision Threshold:
  * - < 1% discrepancy: Keep history, proceed with standard snapshot
@@ -44,7 +62,7 @@ interface ComparisonStats {
   difference: number
   difference_percent: number
   missing_in_db: number
-  missing_in_dump: number
+  orphaned_in_db: number  // In DB but not in dump (should be deleted)
   data_mismatches: number
 }
 
@@ -63,6 +81,22 @@ interface ValidationReport {
     dump_value: string
   }[]
   summary: string
+}
+
+interface DetailedDiscrepancy {
+  table: string
+  key: Record<string, string | number>
+  issue_type: 'missing_in_db' | 'orphaned_in_db' | 'data_mismatch'
+  motherduck: Record<string, unknown> | null
+  kbo: Record<string, unknown> | null
+  differing_fields?: string[]
+}
+
+interface DiscrepancyReport {
+  generated_at: string
+  full_dump_extract: number
+  full_dump_date: string
+  discrepancies: DetailedDiscrepancy[]
 }
 
 /**
@@ -110,13 +144,14 @@ async function importToTempTables(conn: any, dataDir: string, database: string):
   console.log('\n📥 Importing full dump into temporary tables...\n')
 
   const files = [
-    { csv: 'enterprise.csv', table: 'nov_enterprises' },
-    { csv: 'establishment.csv', table: 'nov_establishments' },
-    { csv: 'denomination.csv', table: 'nov_denominations' },
-    { csv: 'address.csv', table: 'nov_addresses' },
-    { csv: 'activity.csv', table: 'nov_activities' },
-    { csv: 'contact.csv', table: 'nov_contacts' },
-    { csv: 'branch.csv', table: 'nov_branches' }
+    { csv: 'enterprise.csv', table: 'dump_enterprises' },
+    { csv: 'establishment.csv', table: 'dump_establishments' },
+    { csv: 'denomination.csv', table: 'dump_denominations' },
+    { csv: 'address.csv', table: 'dump_addresses' },
+    { csv: 'activity.csv', table: 'dump_activities' },
+    { csv: 'contact.csv', table: 'dump_contacts' },
+    { csv: 'branch.csv', table: 'dump_branches' },
+    { csv: 'code.csv', table: 'dump_codes' }
   ]
 
   for (const { csv, table } of files) {
@@ -127,14 +162,21 @@ async function importToTempTables(conn: any, dataDir: string, database: string):
       continue
     }
 
-    console.log(`   📄 Loading ${csv}...`)
+    process.stdout.write(`   📄 Loading ${csv}...`)
+    const loadStart = Date.now()
 
     await conn.run(`
       CREATE OR REPLACE TABLE ${table} AS
       SELECT * FROM read_csv('${csvPath}', AUTO_DETECT=TRUE, HEADER=TRUE)
     `)
 
-    console.log(`   ✓ ${csv} loaded to ${table}`)
+    // Get row count
+    const countResult = await conn.run(`SELECT COUNT(*) FROM ${table}`)
+    const countChunks = await countResult.fetchAllChunks()
+    const rowCount = Number(countChunks[0].getRows()[0][0])
+    const loadTime = ((Date.now() - loadStart) / 1000).toFixed(1)
+
+    console.log(` ${rowCount.toLocaleString()} rows (${loadTime}s)`)
   }
 
   console.log('\n   ✅ All CSV files loaded into temporary tables')
@@ -149,7 +191,8 @@ async function compareStates(conn: any): Promise<ComparisonStats[]> {
   const comparisons: ComparisonStats[] = []
 
   // Compare enterprises
-  console.log('   📊 Analyzing enterprises...')
+  process.stdout.write('   📊 Analyzing enterprises...')
+  const entStart = Date.now()
   const entResult = await conn.run(`
     WITH current_db AS (
       SELECT enterprise_number
@@ -158,17 +201,18 @@ async function compareStates(conn: any): Promise<ComparisonStats[]> {
     ),
     full_dump AS (
       SELECT "EnterpriseNumber" as enterprise_number
-      FROM nov_enterprises
+      FROM dump_enterprises
     )
     SELECT
       (SELECT COUNT(*) FROM current_db) as current_db_count,
       (SELECT COUNT(*) FROM full_dump) as full_dump_count,
       (SELECT COUNT(*) FROM full_dump WHERE enterprise_number NOT IN (SELECT enterprise_number FROM current_db)) as missing_in_db,
-      (SELECT COUNT(*) FROM current_db WHERE enterprise_number NOT IN (SELECT enterprise_number FROM full_dump)) as missing_in_dump
+      (SELECT COUNT(*) FROM current_db WHERE enterprise_number NOT IN (SELECT enterprise_number FROM full_dump)) as orphaned_in_db
   `)
 
   const entChunks = await entResult.fetchAllChunks()
   const entRow = entChunks[0].getRows()[0]
+  console.log(` (${((Date.now() - entStart) / 1000).toFixed(1)}s)`)
 
   const entDiff = Math.abs(Number(entRow[0]) - Number(entRow[1]))
   const entPercent = Number(entRow[1]) > 0 ? (entDiff / Number(entRow[1])) * 100 : 0
@@ -180,14 +224,15 @@ async function compareStates(conn: any): Promise<ComparisonStats[]> {
     difference: entDiff,
     difference_percent: entPercent,
     missing_in_db: Number(entRow[2]),
-    missing_in_dump: Number(entRow[3]),
+    orphaned_in_db: Number(entRow[3]),
     data_mismatches: 0
   })
 
-  console.log(`      DB: ${Number(entRow[0]).toLocaleString()} | Dump: ${Number(entRow[1]).toLocaleString()} | Diff: ${entDiff.toLocaleString()} (${entPercent.toFixed(2)}%)`)
+  console.log(`      DB: ${Number(entRow[0]).toLocaleString()} | Dump: ${Number(entRow[1]).toLocaleString()} | Missing: ${Number(entRow[2]).toLocaleString()} | Orphaned: ${Number(entRow[3]).toLocaleString()}`)
 
   // Compare establishments
-  console.log('   📊 Analyzing establishments...')
+  process.stdout.write('   📊 Analyzing establishments...')
+  const estStart = Date.now()
   const estResult = await conn.run(`
     WITH current_db AS (
       SELECT establishment_number
@@ -196,17 +241,18 @@ async function compareStates(conn: any): Promise<ComparisonStats[]> {
     ),
     full_dump AS (
       SELECT "EstablishmentNumber" as establishment_number
-      FROM nov_establishments
+      FROM dump_establishments
     )
     SELECT
       (SELECT COUNT(*) FROM current_db) as current_db_count,
       (SELECT COUNT(*) FROM full_dump) as full_dump_count,
       (SELECT COUNT(*) FROM full_dump WHERE establishment_number NOT IN (SELECT establishment_number FROM current_db)) as missing_in_db,
-      (SELECT COUNT(*) FROM current_db WHERE establishment_number NOT IN (SELECT establishment_number FROM full_dump)) as missing_in_dump
+      (SELECT COUNT(*) FROM current_db WHERE establishment_number NOT IN (SELECT establishment_number FROM full_dump)) as orphaned_in_db
   `)
 
   const estChunks = await estResult.fetchAllChunks()
   const estRow = estChunks[0].getRows()[0]
+  console.log(` (${((Date.now() - estStart) / 1000).toFixed(1)}s)`)
 
   const estDiff = Math.abs(Number(estRow[0]) - Number(estRow[1]))
   const estPercent = Number(estRow[1]) > 0 ? (estDiff / Number(estRow[1])) * 100 : 0
@@ -218,18 +264,72 @@ async function compareStates(conn: any): Promise<ComparisonStats[]> {
     difference: estDiff,
     difference_percent: estPercent,
     missing_in_db: Number(estRow[2]),
-    missing_in_dump: Number(estRow[3]),
+    orphaned_in_db: Number(estRow[3]),
     data_mismatches: 0
   })
 
-  console.log(`      DB: ${Number(estRow[0]).toLocaleString()} | Dump: ${Number(estRow[1]).toLocaleString()} | Diff: ${estDiff.toLocaleString()} (${estPercent.toFixed(2)}%)`)
+  console.log(`      DB: ${Number(estRow[0]).toLocaleString()} | Dump: ${Number(estRow[1]).toLocaleString()} | Missing: ${Number(estRow[2]).toLocaleString()} | Orphaned: ${Number(estRow[3]).toLocaleString()}`)
 
-  // Compare activities (row counts)
+  // Compare denominations (row count)
+  console.log('   📊 Analyzing denominations (row count)...')
+  const denomResult = await conn.run(`
+    SELECT
+      (SELECT COUNT(*) FROM denominations WHERE _is_current = true) as current_db_count,
+      (SELECT COUNT(*) FROM dump_denominations) as full_dump_count
+  `)
+
+  const denomChunks = await denomResult.fetchAllChunks()
+  const denomRow = denomChunks[0].getRows()[0]
+
+  const denomDiff = Math.abs(Number(denomRow[0]) - Number(denomRow[1]))
+  const denomPercent = Number(denomRow[1]) > 0 ? (denomDiff / Number(denomRow[1])) * 100 : 0
+
+  comparisons.push({
+    table_name: 'denominations',
+    current_db_count: Number(denomRow[0]),
+    full_dump_count: Number(denomRow[1]),
+    difference: denomDiff,
+    difference_percent: denomPercent,
+    missing_in_db: 0,
+    orphaned_in_db: 0,
+    data_mismatches: 0
+  })
+
+  console.log(`      DB: ${Number(denomRow[0]).toLocaleString()} | Dump: ${Number(denomRow[1]).toLocaleString()} | Diff: ${denomDiff.toLocaleString()} (${denomPercent.toFixed(2)}%)`)
+
+  // Compare addresses (row count)
+  console.log('   📊 Analyzing addresses (row count)...')
+  const addrResult = await conn.run(`
+    SELECT
+      (SELECT COUNT(*) FROM addresses WHERE _is_current = true) as current_db_count,
+      (SELECT COUNT(*) FROM dump_addresses) as full_dump_count
+  `)
+
+  const addrChunks = await addrResult.fetchAllChunks()
+  const addrRow = addrChunks[0].getRows()[0]
+
+  const addrDiff = Math.abs(Number(addrRow[0]) - Number(addrRow[1]))
+  const addrPercent = Number(addrRow[1]) > 0 ? (addrDiff / Number(addrRow[1])) * 100 : 0
+
+  comparisons.push({
+    table_name: 'addresses',
+    current_db_count: Number(addrRow[0]),
+    full_dump_count: Number(addrRow[1]),
+    difference: addrDiff,
+    difference_percent: addrPercent,
+    missing_in_db: 0,
+    orphaned_in_db: 0,
+    data_mismatches: 0
+  })
+
+  console.log(`      DB: ${Number(addrRow[0]).toLocaleString()} | Dump: ${Number(addrRow[1]).toLocaleString()} | Diff: ${addrDiff.toLocaleString()} (${addrPercent.toFixed(2)}%)`)
+
+  // Compare activities (row count)
   console.log('   📊 Analyzing activities (row count)...')
   const actResult = await conn.run(`
     SELECT
       (SELECT COUNT(*) FROM activities WHERE _is_current = true) as current_db_count,
-      (SELECT COUNT(*) FROM nov_activities) as full_dump_count
+      (SELECT COUNT(*) FROM dump_activities) as full_dump_count
   `)
 
   const actChunks = await actResult.fetchAllChunks()
@@ -245,15 +345,521 @@ async function compareStates(conn: any): Promise<ComparisonStats[]> {
     difference: actDiff,
     difference_percent: actPercent,
     missing_in_db: 0,
-    missing_in_dump: 0,
+    orphaned_in_db: 0,
     data_mismatches: 0
   })
 
   console.log(`      DB: ${Number(actRow[0]).toLocaleString()} | Dump: ${Number(actRow[1]).toLocaleString()} | Diff: ${actDiff.toLocaleString()} (${actPercent.toFixed(2)}%)`)
 
+  // Compare contacts (row count)
+  console.log('   📊 Analyzing contacts (row count)...')
+  const contactResult = await conn.run(`
+    SELECT
+      (SELECT COUNT(*) FROM contacts WHERE _is_current = true) as current_db_count,
+      (SELECT COUNT(*) FROM dump_contacts) as full_dump_count
+  `)
+
+  const contactChunks = await contactResult.fetchAllChunks()
+  const contactRow = contactChunks[0].getRows()[0]
+
+  const contactDiff = Math.abs(Number(contactRow[0]) - Number(contactRow[1]))
+  const contactPercent = Number(contactRow[1]) > 0 ? (contactDiff / Number(contactRow[1])) * 100 : 0
+
+  comparisons.push({
+    table_name: 'contacts',
+    current_db_count: Number(contactRow[0]),
+    full_dump_count: Number(contactRow[1]),
+    difference: contactDiff,
+    difference_percent: contactPercent,
+    missing_in_db: 0,
+    orphaned_in_db: 0,
+    data_mismatches: 0
+  })
+
+  console.log(`      DB: ${Number(contactRow[0]).toLocaleString()} | Dump: ${Number(contactRow[1]).toLocaleString()} | Diff: ${contactDiff.toLocaleString()} (${contactPercent.toFixed(2)}%)`)
+
+  // Compare branches (row count)
+  console.log('   📊 Analyzing branches (row count)...')
+  const branchResult = await conn.run(`
+    SELECT
+      (SELECT COUNT(*) FROM branches WHERE _is_current = true) as current_db_count,
+      (SELECT COUNT(*) FROM dump_branches) as full_dump_count
+  `)
+
+  const branchChunks = await branchResult.fetchAllChunks()
+  const branchRow = branchChunks[0].getRows()[0]
+
+  const branchDiff = Math.abs(Number(branchRow[0]) - Number(branchRow[1]))
+  const branchPercent = Number(branchRow[1]) > 0 ? (branchDiff / Number(branchRow[1])) * 100 : 0
+
+  comparisons.push({
+    table_name: 'branches',
+    current_db_count: Number(branchRow[0]),
+    full_dump_count: Number(branchRow[1]),
+    difference: branchDiff,
+    difference_percent: branchPercent,
+    missing_in_db: 0,
+    orphaned_in_db: 0,
+    data_mismatches: 0
+  })
+
+  console.log(`      DB: ${Number(branchRow[0]).toLocaleString()} | Dump: ${Number(branchRow[1]).toLocaleString()} | Diff: ${branchDiff.toLocaleString()} (${branchPercent.toFixed(2)}%)`)
+
+  // Compare codes (row count)
+  console.log('   📊 Analyzing codes (row count)...')
+  const codesResult = await conn.run(`
+    SELECT
+      (SELECT COUNT(*) FROM codes) as current_db_count,
+      (SELECT COUNT(*) FROM dump_codes) as full_dump_count
+  `)
+
+  const codesChunks = await codesResult.fetchAllChunks()
+  const codesRow = codesChunks[0].getRows()[0]
+
+  const codesDiff = Math.abs(Number(codesRow[0]) - Number(codesRow[1]))
+  const codesPercent = Number(codesRow[1]) > 0 ? (codesDiff / Number(codesRow[1])) * 100 : 0
+
+  comparisons.push({
+    table_name: 'codes',
+    current_db_count: Number(codesRow[0]),
+    full_dump_count: Number(codesRow[1]),
+    difference: codesDiff,
+    difference_percent: codesPercent,
+    missing_in_db: 0,
+    orphaned_in_db: 0,
+    data_mismatches: 0
+  })
+
+  console.log(`      DB: ${Number(codesRow[0]).toLocaleString()} | Dump: ${Number(codesRow[1]).toLocaleString()} | Diff: ${codesDiff.toLocaleString()} (${codesPercent.toFixed(2)}%)`)
+
   console.log('\n   ✅ Comparison complete')
 
   return comparisons
+}
+
+/**
+ * Collect all detailed discrepancies for local storage
+ */
+async function collectDetailedDiscrepancies(conn: any): Promise<DetailedDiscrepancy[]> {
+  console.log('\n📋 Collecting detailed discrepancies...\n')
+  const discrepancies: DetailedDiscrepancy[] = []
+  const totalStart = Date.now()
+
+  // Enterprises missing in DB
+  process.stdout.write('   📄 Enterprises missing in DB...')
+  const entMissingStart = Date.now()
+  const entMissingInDb = await conn.run(`
+    SELECT *
+    FROM dump_enterprises
+    WHERE "EnterpriseNumber" NOT IN (SELECT enterprise_number FROM enterprises WHERE _is_current = true)
+  `)
+  for (const chunk of await entMissingInDb.fetchAllChunks()) {
+    for (const row of chunk.getRows()) {
+      const kboRecord: Record<string, unknown> = {}
+      const columns = chunk.columnNames
+      columns.forEach((col: string, i: number) => { kboRecord[col] = row[i] })
+      discrepancies.push({
+        table: 'enterprises',
+        key: { enterprise_number: String(kboRecord['EnterpriseNumber']) },
+        issue_type: 'missing_in_db',
+        motherduck: null,
+        kbo: kboRecord
+      })
+    }
+  }
+  const entMissingCount = discrepancies.filter(d => d.table === 'enterprises' && d.issue_type === 'missing_in_db').length
+  console.log(` ${entMissingCount.toLocaleString()} found (${((Date.now() - entMissingStart) / 1000).toFixed(1)}s)`)
+
+  // Enterprises orphaned in DB (in DB but not in dump - should be deleted)
+  process.stdout.write('   📄 Enterprises orphaned in DB...')
+  const entOrphanedStart = Date.now()
+  const entOrphaned = await conn.run(`
+    SELECT *
+    FROM enterprises
+    WHERE _is_current = true
+      AND enterprise_number NOT IN (SELECT "EnterpriseNumber" FROM dump_enterprises)
+  `)
+  for (const chunk of await entOrphaned.fetchAllChunks()) {
+    for (const row of chunk.getRows()) {
+      const mdRecord: Record<string, unknown> = {}
+      const columns = chunk.columnNames
+      columns.forEach((col: string, i: number) => { mdRecord[col] = row[i] })
+      discrepancies.push({
+        table: 'enterprises',
+        key: { enterprise_number: String(mdRecord['enterprise_number']) },
+        issue_type: 'orphaned_in_db',
+        motherduck: mdRecord,
+        kbo: null
+      })
+    }
+  }
+  const entOrphanedCount = discrepancies.filter(d => d.table === 'enterprises' && d.issue_type === 'orphaned_in_db').length
+  console.log(` ${entOrphanedCount.toLocaleString()} found (${((Date.now() - entOrphanedStart) / 1000).toFixed(1)}s)`)
+
+  // Establishments missing in DB
+  process.stdout.write('   📄 Establishments missing in DB...')
+  const estMissingStart = Date.now()
+  const estMissingInDb = await conn.run(`
+    SELECT *
+    FROM dump_establishments
+    WHERE "EstablishmentNumber" NOT IN (SELECT establishment_number FROM establishments WHERE _is_current = true)
+  `)
+  for (const chunk of await estMissingInDb.fetchAllChunks()) {
+    for (const row of chunk.getRows()) {
+      const kboRecord: Record<string, unknown> = {}
+      const columns = chunk.columnNames
+      columns.forEach((col: string, i: number) => { kboRecord[col] = row[i] })
+      discrepancies.push({
+        table: 'establishments',
+        key: { establishment_number: String(kboRecord['EstablishmentNumber']) },
+        issue_type: 'missing_in_db',
+        motherduck: null,
+        kbo: kboRecord
+      })
+    }
+  }
+  const estMissingCount = discrepancies.filter(d => d.table === 'establishments' && d.issue_type === 'missing_in_db').length
+  console.log(` ${estMissingCount.toLocaleString()} found (${((Date.now() - estMissingStart) / 1000).toFixed(1)}s)`)
+
+  // Establishments orphaned in DB (in DB but not in dump - should be deleted)
+  process.stdout.write('   📄 Establishments orphaned in DB...')
+  const estOrphanedStart = Date.now()
+  const estOrphaned = await conn.run(`
+    SELECT *
+    FROM establishments
+    WHERE _is_current = true
+      AND establishment_number NOT IN (SELECT "EstablishmentNumber" FROM dump_establishments)
+  `)
+  for (const chunk of await estOrphaned.fetchAllChunks()) {
+    for (const row of chunk.getRows()) {
+      const mdRecord: Record<string, unknown> = {}
+      const columns = chunk.columnNames
+      columns.forEach((col: string, i: number) => { mdRecord[col] = row[i] })
+      discrepancies.push({
+        table: 'establishments',
+        key: { establishment_number: String(mdRecord['establishment_number']) },
+        issue_type: 'orphaned_in_db',
+        motherduck: mdRecord,
+        kbo: null
+      })
+    }
+  }
+  const estOrphanedCount = discrepancies.filter(d => d.table === 'establishments' && d.issue_type === 'orphaned_in_db').length
+  console.log(` ${estOrphanedCount.toLocaleString()} found (${((Date.now() - estOrphanedStart) / 1000).toFixed(1)}s)`)
+
+  // Denominations - compare on business key (entity_number, denomination_type, language, denomination)
+  // Using LEFT JOIN instead of NOT IN to handle NULL values correctly
+  process.stdout.write('   📄 Denominations orphaned in DB...')
+  const denomOrphanedStart = Date.now()
+  const denomOrphaned = await conn.run(`
+    SELECT d.entity_number, d.denomination_type, d.language, d.denomination
+    FROM denominations d
+    LEFT JOIN dump_denominations dd
+      ON d.entity_number = dd."EntityNumber"::VARCHAR
+      AND d.denomination_type = dd."TypeOfDenomination"::VARCHAR
+      AND d.language = dd."Language"::VARCHAR
+      AND d.denomination = dd."Denomination"::VARCHAR
+    WHERE d._is_current = true
+      AND dd."EntityNumber" IS NULL
+  `)
+  for (const chunk of await denomOrphaned.fetchAllChunks()) {
+    for (const row of chunk.getRows()) {
+      discrepancies.push({
+        table: 'denominations',
+        key: {
+          entity_number: String(row[0]),
+          denomination_type: String(row[1]),
+          language: String(row[2])
+        },
+        issue_type: 'orphaned_in_db',
+        motherduck: { denomination: row[3] },
+        kbo: null
+      })
+    }
+  }
+  const denomOrphanedCount = discrepancies.filter(d => d.table === 'denominations' && d.issue_type === 'orphaned_in_db').length
+  console.log(` ${denomOrphanedCount.toLocaleString()} found (${((Date.now() - denomOrphanedStart) / 1000).toFixed(1)}s)`)
+
+  process.stdout.write('   📄 Denominations missing in DB...')
+  const denomMissingStart = Date.now()
+  const denomMissing = await conn.run(`
+    SELECT dd."EntityNumber"::VARCHAR, dd."TypeOfDenomination"::VARCHAR, dd."Language"::VARCHAR, dd."Denomination"::VARCHAR
+    FROM dump_denominations dd
+    LEFT JOIN denominations d
+      ON dd."EntityNumber"::VARCHAR = d.entity_number
+      AND dd."TypeOfDenomination"::VARCHAR = d.denomination_type
+      AND dd."Language"::VARCHAR = d.language
+      AND dd."Denomination"::VARCHAR = d.denomination
+      AND d._is_current = true
+    WHERE d.entity_number IS NULL
+  `)
+  for (const chunk of await denomMissing.fetchAllChunks()) {
+    for (const row of chunk.getRows()) {
+      discrepancies.push({
+        table: 'denominations',
+        key: {
+          entity_number: String(row[0]),
+          denomination_type: String(row[1]),
+          language: String(row[2])
+        },
+        issue_type: 'missing_in_db',
+        motherduck: null,
+        kbo: { denomination: row[3] }
+      })
+    }
+  }
+  const denomMissingCount = discrepancies.filter(d => d.table === 'denominations' && d.issue_type === 'missing_in_db').length
+  console.log(` ${denomMissingCount.toLocaleString()} found (${((Date.now() - denomMissingStart) / 1000).toFixed(1)}s)`)
+
+  // Activities - compare on business key
+  process.stdout.write('   📄 Activities orphaned in DB...')
+  const actOrphanedStart = Date.now()
+  const actOrphaned = await conn.run(`
+    SELECT a.entity_number, a.activity_group, a.nace_version, a.nace_code, a.classification
+    FROM activities a
+    LEFT JOIN dump_activities da
+      ON a.entity_number = da."EntityNumber"::VARCHAR
+      AND a.activity_group = da."ActivityGroup"::VARCHAR
+      AND a.nace_version = da."NaceVersion"::VARCHAR
+      AND a.nace_code = da."NaceCode"::VARCHAR
+      AND a.classification = da."Classification"::VARCHAR
+    WHERE a._is_current = true
+      AND da."EntityNumber" IS NULL
+  `)
+  for (const chunk of await actOrphaned.fetchAllChunks()) {
+    for (const row of chunk.getRows()) {
+      discrepancies.push({
+        table: 'activities',
+        key: {
+          entity_number: String(row[0]),
+          activity_group: String(row[1]),
+          nace_version: String(row[2]),
+          nace_code: String(row[3]),
+          classification: String(row[4])
+        },
+        issue_type: 'orphaned_in_db',
+        motherduck: null,
+        kbo: null
+      })
+    }
+  }
+  const actOrphanedCount = discrepancies.filter(d => d.table === 'activities' && d.issue_type === 'orphaned_in_db').length
+  console.log(` ${actOrphanedCount.toLocaleString()} found (${((Date.now() - actOrphanedStart) / 1000).toFixed(1)}s)`)
+
+  process.stdout.write('   📄 Activities missing in DB...')
+  const actMissingStart = Date.now()
+  const actMissing = await conn.run(`
+    SELECT da."EntityNumber"::VARCHAR, da."ActivityGroup"::VARCHAR, da."NaceVersion"::VARCHAR, da."NaceCode"::VARCHAR, da."Classification"::VARCHAR
+    FROM dump_activities da
+    LEFT JOIN activities a
+      ON da."EntityNumber"::VARCHAR = a.entity_number
+      AND da."ActivityGroup"::VARCHAR = a.activity_group
+      AND da."NaceVersion"::VARCHAR = a.nace_version
+      AND da."NaceCode"::VARCHAR = a.nace_code
+      AND da."Classification"::VARCHAR = a.classification
+      AND a._is_current = true
+    WHERE a.entity_number IS NULL
+  `)
+  for (const chunk of await actMissing.fetchAllChunks()) {
+    for (const row of chunk.getRows()) {
+      discrepancies.push({
+        table: 'activities',
+        key: {
+          entity_number: String(row[0]),
+          activity_group: String(row[1]),
+          nace_version: String(row[2]),
+          nace_code: String(row[3]),
+          classification: String(row[4])
+        },
+        issue_type: 'missing_in_db',
+        motherduck: null,
+        kbo: null
+      })
+    }
+  }
+  const actMissingCount = discrepancies.filter(d => d.table === 'activities' && d.issue_type === 'missing_in_db').length
+  console.log(` ${actMissingCount.toLocaleString()} found (${((Date.now() - actMissingStart) / 1000).toFixed(1)}s)`)
+
+  // Contacts - compare on business key
+  process.stdout.write('   📄 Contacts orphaned in DB...')
+  const contactOrphanedStart = Date.now()
+  const contactOrphaned = await conn.run(`
+    SELECT c.entity_number, c.entity_contact, c.contact_type, c.contact_value
+    FROM contacts c
+    LEFT JOIN dump_contacts dc
+      ON c.entity_number = dc."EntityNumber"::VARCHAR
+      AND c.entity_contact = dc."EntityContact"::VARCHAR
+      AND c.contact_type = dc."ContactType"::VARCHAR
+      AND c.contact_value = dc."Value"::VARCHAR
+    WHERE c._is_current = true
+      AND dc."EntityNumber" IS NULL
+  `)
+  for (const chunk of await contactOrphaned.fetchAllChunks()) {
+    for (const row of chunk.getRows()) {
+      discrepancies.push({
+        table: 'contacts',
+        key: {
+          entity_number: String(row[0]),
+          entity_contact: String(row[1]),
+          contact_type: String(row[2])
+        },
+        issue_type: 'orphaned_in_db',
+        motherduck: { contact_value: row[3] },
+        kbo: null
+      })
+    }
+  }
+  const contactOrphanedCount = discrepancies.filter(d => d.table === 'contacts' && d.issue_type === 'orphaned_in_db').length
+  console.log(` ${contactOrphanedCount.toLocaleString()} found (${((Date.now() - contactOrphanedStart) / 1000).toFixed(1)}s)`)
+
+  process.stdout.write('   📄 Contacts missing in DB...')
+  const contactMissingStart = Date.now()
+  const contactMissing = await conn.run(`
+    SELECT dc."EntityNumber"::VARCHAR, dc."EntityContact"::VARCHAR, dc."ContactType"::VARCHAR, dc."Value"::VARCHAR
+    FROM dump_contacts dc
+    LEFT JOIN contacts c
+      ON dc."EntityNumber"::VARCHAR = c.entity_number
+      AND dc."EntityContact"::VARCHAR = c.entity_contact
+      AND dc."ContactType"::VARCHAR = c.contact_type
+      AND dc."Value"::VARCHAR = c.contact_value
+      AND c._is_current = true
+    WHERE c.entity_number IS NULL
+  `)
+  for (const chunk of await contactMissing.fetchAllChunks()) {
+    for (const row of chunk.getRows()) {
+      discrepancies.push({
+        table: 'contacts',
+        key: {
+          entity_number: String(row[0]),
+          entity_contact: String(row[1]),
+          contact_type: String(row[2])
+        },
+        issue_type: 'missing_in_db',
+        motherduck: null,
+        kbo: { contact_value: row[3] }
+      })
+    }
+  }
+  const contactMissingCount = discrepancies.filter(d => d.table === 'contacts' && d.issue_type === 'missing_in_db').length
+  console.log(` ${contactMissingCount.toLocaleString()} found (${((Date.now() - contactMissingStart) / 1000).toFixed(1)}s)`)
+
+  // Codes - check for missing and data mismatches
+  // The codes table uses (Category, Code, Language) as composite key
+  process.stdout.write('   📄 Codes missing in DB...')
+  const codesMissingStart = Date.now()
+  const codesMissingInDb = await conn.run(`
+    SELECT *
+    FROM dump_codes
+    WHERE ("Category", "Code", "Language") NOT IN (
+      SELECT category, code, language FROM codes
+    )
+  `)
+  for (const chunk of await codesMissingInDb.fetchAllChunks()) {
+    for (const row of chunk.getRows()) {
+      const kboRecord: Record<string, unknown> = {}
+      const columns = chunk.columnNames
+      columns.forEach((col: string, i: number) => { kboRecord[col] = row[i] })
+      discrepancies.push({
+        table: 'codes',
+        key: {
+          category: String(kboRecord['Category']),
+          code: String(kboRecord['Code']),
+          language: String(kboRecord['Language'])
+        },
+        issue_type: 'missing_in_db',
+        motherduck: null,
+        kbo: kboRecord
+      })
+    }
+  }
+  const codesMissingCount = discrepancies.filter(d => d.table === 'codes' && d.issue_type === 'missing_in_db').length
+  console.log(` ${codesMissingCount.toLocaleString()} found (${((Date.now() - codesMissingStart) / 1000).toFixed(1)}s)`)
+
+  process.stdout.write('   📄 Codes orphaned in DB...')
+  const codesOrphanedStart = Date.now()
+  const codesOrphaned = await conn.run(`
+    SELECT *
+    FROM codes
+    WHERE (category, code, language) NOT IN (
+      SELECT "Category", "Code", "Language" FROM dump_codes
+    )
+  `)
+  for (const chunk of await codesOrphaned.fetchAllChunks()) {
+    for (const row of chunk.getRows()) {
+      const mdRecord: Record<string, unknown> = {}
+      const columns = chunk.columnNames
+      columns.forEach((col: string, i: number) => { mdRecord[col] = row[i] })
+      discrepancies.push({
+        table: 'codes',
+        key: {
+          category: String(mdRecord['category']),
+          code: String(mdRecord['code']),
+          language: String(mdRecord['language'])
+        },
+        issue_type: 'orphaned_in_db',
+        motherduck: mdRecord,
+        kbo: null
+      })
+    }
+  }
+  const codesOrphanedCount = discrepancies.filter(d => d.table === 'codes' && d.issue_type === 'orphaned_in_db').length
+  console.log(` ${codesOrphanedCount.toLocaleString()} found (${((Date.now() - codesOrphanedStart) / 1000).toFixed(1)}s)`)
+
+  // Codes data mismatches (same key but different description)
+  process.stdout.write('   📄 Codes with different descriptions...')
+  const codesMismatchStart = Date.now()
+  const codesMismatch = await conn.run(`
+    SELECT
+      c.category, c.code, c.language, c.description as md_description,
+      n."Description" as kbo_description
+    FROM codes c
+    JOIN dump_codes n ON c.category = n."Category" AND c.code = n."Code" AND c.language = n."Language"
+    WHERE c.description != n."Description"
+  `)
+  for (const chunk of await codesMismatch.fetchAllChunks()) {
+    for (const row of chunk.getRows()) {
+      discrepancies.push({
+        table: 'codes',
+        key: {
+          category: String(row[0]),
+          code: String(row[1]),
+          language: String(row[2])
+        },
+        issue_type: 'data_mismatch',
+        motherduck: { description: row[3] },
+        kbo: { description: row[4] },
+        differing_fields: ['description']
+      })
+    }
+  }
+  const codesMismatchCount = discrepancies.filter(d => d.table === 'codes' && d.issue_type === 'data_mismatch').length
+  console.log(` ${codesMismatchCount.toLocaleString()} found (${((Date.now() - codesMismatchStart) / 1000).toFixed(1)}s)`)
+
+  const totalTime = ((Date.now() - totalStart) / 1000).toFixed(1)
+  console.log(`\n   ✅ Total discrepancies collected: ${discrepancies.length.toLocaleString()} (${totalTime}s)`)
+  return discrepancies
+}
+
+/**
+ * Save discrepancies to JSON file
+ */
+function saveDiscrepancies(
+  discrepancies: DetailedDiscrepancy[],
+  metadata: Metadata,
+  outputDir: string
+): string {
+  const report: DiscrepancyReport = {
+    generated_at: new Date().toISOString(),
+    full_dump_extract: metadata.extractNumber,
+    full_dump_date: metadata.snapshotDate,
+    discrepancies
+  }
+
+  const filename = `discrepancies-${metadata.extractNumber}-${new Date().toISOString().split('T')[0]}.json`
+  const outputPath = join(outputDir, filename)
+
+  fs.writeFileSync(outputPath, JSON.stringify(report, null, 2))
+  return outputPath
 }
 
 /**
@@ -262,27 +868,27 @@ async function compareStates(conn: any): Promise<ComparisonStats[]> {
 async function getSampleDiscrepancies(conn: any): Promise<ValidationReport['sample_discrepancies']> {
   const samples: ValidationReport['sample_discrepancies'] = []
 
-  // Find 5 enterprises in DB but not in dump
-  const missingInDumpResult = await conn.run(`
+  // Find 5 enterprises in DB but not in dump (orphaned)
+  const orphanedResult = await conn.run(`
     SELECT
       enterprise_number,
       status,
       primary_name
     FROM enterprises
     WHERE _is_current = true
-      AND enterprise_number NOT IN (SELECT "EnterpriseNumber" FROM nov_enterprises)
+      AND enterprise_number NOT IN (SELECT "EnterpriseNumber" FROM dump_enterprises)
     LIMIT 5
   `)
 
-  const missingInDumpChunks = await missingInDumpResult.fetchAllChunks()
-  for (const chunk of missingInDumpChunks) {
+  const orphanedChunks = await orphanedResult.fetchAllChunks()
+  for (const chunk of orphanedChunks) {
     const rows = chunk.getRows()
     for (const row of rows) {
       samples.push({
         entity_id: String(row[0]),
-        issue_type: 'missing_in_dump',
+        issue_type: 'orphaned_in_db',
         db_value: `${row[1]} - ${row[2]}`,
-        dump_value: 'NOT FOUND'
+        dump_value: 'NOT IN DUMP'
       })
     }
   }
@@ -292,7 +898,7 @@ async function getSampleDiscrepancies(conn: any): Promise<ValidationReport['samp
     SELECT
       "EnterpriseNumber" as enterprise_number,
       "Status" as status
-    FROM nov_enterprises
+    FROM dump_enterprises
     WHERE "EnterpriseNumber" NOT IN (SELECT enterprise_number FROM enterprises WHERE _is_current = true)
     LIMIT 5
   `)
@@ -344,6 +950,12 @@ async function generateReport(
     recommendationReason = `High discrepancy (${overallPercent.toFixed(2)}%). Significant divergence suggests data quality or import issues. Recommend resetting from full dump #${metadata.extractNumber} as new baseline.`
   }
 
+  // Find specific table stats
+  const entStats = comparisons.find(c => c.table_name === 'enterprises')
+  const estStats = comparisons.find(c => c.table_name === 'establishments')
+  const actStats = comparisons.find(c => c.table_name === 'activities')
+  const codesStats = comparisons.find(c => c.table_name === 'codes')
+
   // Generate summary
   const summary = `
 Validation Summary:
@@ -352,9 +964,10 @@ Validation Summary:
 - Overall discrepancy: ${overallPercent.toFixed(2)}%
 
 Key Findings:
-- Enterprises: ${comparisons[0]?.difference_percent.toFixed(2)}% difference (${comparisons[0]?.missing_in_db} missing in DB, ${comparisons[0]?.missing_in_dump} missing in dump)
-- Establishments: ${comparisons[1]?.difference_percent.toFixed(2)}% difference (${comparisons[1]?.missing_in_db} missing in DB, ${comparisons[1]?.missing_in_dump} missing in dump)
-- Activities: ${comparisons[2]?.difference_percent.toFixed(2)}% difference
+- Enterprises: ${entStats?.difference_percent.toFixed(2)}% difference (${entStats?.missing_in_db} missing in DB, ${entStats?.orphaned_in_db} orphaned)
+- Establishments: ${estStats?.difference_percent.toFixed(2)}% difference (${estStats?.missing_in_db} missing in DB, ${estStats?.orphaned_in_db} orphaned)
+- Activities: ${actStats?.difference_percent.toFixed(2)}% difference
+- Codes: ${codesStats?.difference_percent.toFixed(2)}% difference
 
 Recommendation: ${recommendation.toUpperCase().replace(/_/g, ' ')}
 ${recommendationReason}
@@ -377,16 +990,16 @@ ${recommendationReason}
  * Clean up temporary tables
  */
 async function cleanupTempTables(conn: any): Promise<void> {
-  console.log('\n🧹 Cleaning up temporary tables...\n')
 
   const tables = [
-    'nov_enterprises',
-    'nov_establishments',
-    'nov_denominations',
-    'nov_addresses',
-    'nov_activities',
-    'nov_contacts',
-    'nov_branches'
+    'dump_enterprises',
+    'dump_establishments',
+    'dump_denominations',
+    'dump_addresses',
+    'dump_activities',
+    'dump_contacts',
+    'dump_branches',
+    'dump_codes'
   ]
 
   for (const table of tables) {
@@ -470,9 +1083,13 @@ async function main() {
     }
     console.log(`   ✅ Current extracts: ${currentExtracts.join(', ')}`)
 
-    // Import to temporary tables
-    console.log('\n4️⃣  Importing full dump to temporary tables...')
-    await importToTempTables(conn, dataDir, database)
+    // Import to temporary tables (unless --skip-import flag)
+    if (args.includes('--skip-import')) {
+      console.log('\n4️⃣  Skipping import (--skip-import flag set, reusing existing dump_* tables)')
+    } else {
+      console.log('\n4️⃣  Importing full dump to temporary tables...')
+      await importToTempTables(conn, dataDir, database)
+    }
 
     // Compare states
     console.log('\n5️⃣  Comparing database state with full dump...')
@@ -483,12 +1100,25 @@ async function main() {
     const samples = await getSampleDiscrepancies(conn)
     console.log(`   ✅ Found ${samples.length} sample discrepancies`)
 
+    // Collect detailed discrepancies for local storage
+    console.log('\n7️⃣  Collecting detailed discrepancies for local storage...')
+    const detailedDiscrepancies = await collectDetailedDiscrepancies(conn)
+
+    // Save discrepancies to JSON file
+    const outputDir = resolve(__dirname, '../output')
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true })
+    }
+    const discrepancyFile = saveDiscrepancies(detailedDiscrepancies, metadata, outputDir)
+    console.log(`   ✅ Discrepancies saved to: ${discrepancyFile}`)
+
     // Generate report
-    console.log('\n7️⃣  Generating validation report...')
+    console.log('\n8️⃣  Generating validation report...')
     const report = await generateReport(metadata, currentExtracts, comparisons, samples)
 
     // Clean up (unless --keep-temp flag provided)
     if (!args.includes('--keep-temp')) {
+      console.log('\n9️⃣  Cleaning up temporary tables...')
       await cleanupTempTables(conn)
     } else {
       console.log('\n💾 Temporary tables kept (--keep-temp flag set)')
