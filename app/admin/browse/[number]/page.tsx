@@ -318,7 +318,7 @@ export default function EnterpriseDetailPage() {
               </h1>
               <p className="text-gray-600 font-mono">{displayDetail.enterpriseNumber}</p>
               <a
-                href={`https://peppolcheck.satisa.be/nl?company=${displayDetail.enterpriseNumber.replace(/\./g, '')}&source=makbo`}
+                href={`https://www.peppolcheck.be/nl?company=${displayDetail.enterpriseNumber.replace(/\./g, '')}&source=makbo`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 hover:underline mt-1"
