@@ -37,7 +37,7 @@ import { join } from 'path'
  * Conservative sizes for large tables, larger for smaller tables
  */
 const BATCH_SIZES: Record<string, number> = {
-  activities: 500,      // Large table, conservative batch size
+  activities: 1000,     // Increased from 500 for large update files
   addresses: 1000,
   contacts: 1000,
   denominations: 1000,
