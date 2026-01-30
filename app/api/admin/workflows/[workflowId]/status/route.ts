@@ -4,12 +4,96 @@
  * GET /api/admin/imports/[workflowId]/status
  *
  * Fetches progress from Restate for a running or completed import workflow.
+ * During "preparing" phase, also queries database for staging progress.
  */
 
 import { NextResponse } from "next/server";
+import { connectMotherduck, closeMotherduck, executeQuery } from "@/lib/motherduck";
+import { createHash } from "crypto";
 
 const RESTATE_INGRESS_URL = process.env.RESTATE_INGRESS_URL || "http://localhost:8080";
 const RESTATE_AUTH_TOKEN = process.env.RESTATE_AUTH_TOKEN;
+
+/**
+ * Generate deterministic job ID from workflow ID (must match batched-update.ts)
+ */
+function generateJobId(workflowId: string): string {
+  const hash = createHash('sha256').update(workflowId).digest('hex');
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-${hash.slice(12, 16)}-${hash.slice(16, 20)}-${hash.slice(20, 32)}`;
+}
+
+/**
+ * Query database for preparation progress
+ */
+async function getPreparationProgress(workflowId: string): Promise<{
+  job_status?: string;
+  staging_counts?: Record<string, number>;
+  extract_number?: number;
+  snapshot_date?: string;
+} | null> {
+  const jobId = generateJobId(workflowId);
+  let db = null;
+
+  try {
+    db = await connectMotherduck();
+
+    // Get job info
+    const jobResult = await executeQuery<{
+      status: string;
+      extract_number: number;
+      snapshot_date: string;
+    }>(db, `
+      SELECT status, extract_number, snapshot_date
+      FROM import_jobs
+      WHERE id = '${jobId}'
+    `);
+
+    if (jobResult.length === 0) {
+      return null;
+    }
+
+    const job = jobResult[0];
+
+    // Get staging table counts
+    const stagingTables = [
+      'import_staging_activities',
+      'import_staging_addresses',
+      'import_staging_branches',
+      'import_staging_contacts',
+      'import_staging_denominations',
+      'import_staging_enterprises',
+      'import_staging_establishments',
+    ];
+
+    const staging_counts: Record<string, number> = {};
+
+    for (const table of stagingTables) {
+      const countResult = await executeQuery<{ count: number }>(db, `
+        SELECT COUNT(*) as count FROM ${table} WHERE job_id = '${jobId}'
+      `);
+      const count = Number(countResult[0]?.count || 0);
+      if (count > 0) {
+        // Extract table name (e.g., "activities" from "import_staging_activities")
+        const tableName = table.replace('import_staging_', '');
+        staging_counts[tableName] = count;
+      }
+    }
+
+    return {
+      job_status: job.status,
+      staging_counts,
+      extract_number: job.extract_number,
+      snapshot_date: job.snapshot_date,
+    };
+  } catch (error) {
+    console.error("Error querying preparation progress:", error);
+    return null;
+  } finally {
+    if (db) {
+      await closeMotherduck(db);
+    }
+  }
+}
 
 export async function GET(
   request: Request,
@@ -51,6 +135,18 @@ export async function GET(
     }
 
     const progress = await response.json();
+
+    // If in preparing state, enrich with database progress
+    if (progress.status === "preparing") {
+      const prepProgress = await getPreparationProgress(workflowId);
+      if (prepProgress) {
+        return NextResponse.json({
+          workflow_id: workflowId,
+          ...progress,
+          preparation: prepProgress,
+        });
+      }
+    }
 
     return NextResponse.json({
       workflow_id: workflowId,

@@ -3,6 +3,13 @@
 import React, { useState, useEffect, use } from 'react'
 import Link from 'next/link'
 
+interface PreparationProgress {
+  job_status?: string
+  staging_counts?: Record<string, number>
+  extract_number?: number
+  snapshot_date?: string
+}
+
 interface WorkflowProgress {
   workflow_id: string
   status: 'pending' | 'downloading' | 'preparing' | 'processing' | 'finalizing' | 'completed' | 'failed'
@@ -12,6 +19,7 @@ interface WorkflowProgress {
   current_table?: string
   current_batch?: number
   error?: string
+  preparation?: PreparationProgress
 }
 
 export default function WorkflowStatusPage({
@@ -135,6 +143,43 @@ export default function WorkflowStatusPage({
                 {getStatusLabel(progress.status)}
               </span>
             </div>
+
+            {/* Preparation Progress */}
+            {progress.status === 'preparing' && progress.preparation && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <svg className="animate-spin h-4 w-4 text-blue-600" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  <span className="text-blue-800 font-medium">Preparing Import</span>
+                </div>
+
+                {progress.preparation.extract_number && (
+                  <p className="text-sm text-blue-700 mb-2">
+                    Extract #{progress.preparation.extract_number} ({progress.preparation.snapshot_date})
+                  </p>
+                )}
+
+                {progress.preparation.staging_counts && Object.keys(progress.preparation.staging_counts).length > 0 ? (
+                  <div>
+                    <p className="text-sm text-blue-700 mb-2">Staging tables populated:</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {Object.entries(progress.preparation.staging_counts).map(([table, count]) => (
+                        <div key={table} className="flex justify-between text-sm bg-white rounded px-2 py-1">
+                          <span className="text-gray-600">{table}</span>
+                          <span className="font-mono text-gray-800">{count.toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-blue-600">
+                    Downloading and parsing ZIP file...
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Progress Bar */}
             {progress.total_batches > 0 && (
