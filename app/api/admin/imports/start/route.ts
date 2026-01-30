@@ -47,26 +47,33 @@ export async function POST(request: Request) {
     blobUrl = blob.url;
     console.log(`Uploaded to blob: ${blob.pathname} (${blob.size} bytes)`);
 
-    // Step 3: Purge any existing workflow with the same ID (allows re-imports)
+    // Step 3: Cancel and purge any existing workflow with the same ID (allows re-imports)
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (RESTATE_AUTH_TOKEN) {
       headers["Authorization"] = `Bearer ${RESTATE_AUTH_TOKEN}`;
     }
 
-    console.log(`Purging any existing workflow: ${workflowId}`);
+    console.log(`Canceling/purging any existing workflow: ${workflowId}`);
     try {
+      // First cancel any running invocation
+      const cancelResponse = await fetch(
+        `${RESTATE_ADMIN_URL}/restate/workflow/KboImport/${workflowId}/cancel`,
+        { method: "POST", headers }
+      );
+      console.log(`Cancel response: ${cancelResponse.status}`);
+
+      // Then purge the workflow state
       const purgeResponse = await fetch(
         `${RESTATE_ADMIN_URL}/restate/workflow/KboImport/${workflowId}/purge`,
         { method: "DELETE", headers }
       );
-      if (purgeResponse.ok) {
-        console.log(`Purged existing workflow: ${workflowId}`);
-        // Small delay to ensure purge is processed
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
+      console.log(`Purge response: ${purgeResponse.status}`);
+
+      // Wait for Restate to process
+      await new Promise(resolve => setTimeout(resolve, 1000));
     } catch (purgeError) {
-      // Ignore purge errors - workflow might not exist
-      console.log(`Purge skipped (workflow may not exist): ${purgeError}`);
+      // Ignore errors - workflow might not exist
+      console.log(`Cancel/purge error (workflow may not exist): ${purgeError}`);
     }
 
     // Step 4: Start workflow via Restate ingress (fire-and-forget with /send)
