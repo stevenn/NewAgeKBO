@@ -14,6 +14,7 @@ import { downloadFile } from "@/lib/kbo-client";
 import { uploadToBlob, deleteFromBlob } from "@/lib/blob";
 
 const RESTATE_INGRESS_URL = process.env.RESTATE_INGRESS_URL || "http://localhost:8080";
+const RESTATE_ADMIN_URL = process.env.RESTATE_ADMIN_URL || "http://localhost:9070";
 const RESTATE_AUTH_TOKEN = process.env.RESTATE_AUTH_TOKEN;
 
 export async function POST(request: Request) {
@@ -46,13 +47,30 @@ export async function POST(request: Request) {
     blobUrl = blob.url;
     console.log(`Uploaded to blob: ${blob.pathname} (${blob.size} bytes)`);
 
-    // Step 3: Start workflow via Restate ingress (fire-and-forget with /send)
-    // Only pass the blob URL - Restate never sees the large file
+    // Step 3: Purge any existing workflow with the same ID (allows re-imports)
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (RESTATE_AUTH_TOKEN) {
       headers["Authorization"] = `Bearer ${RESTATE_AUTH_TOKEN}`;
     }
 
+    console.log(`Purging any existing workflow: ${workflowId}`);
+    try {
+      const purgeResponse = await fetch(
+        `${RESTATE_ADMIN_URL}/restate/workflow/KboImport/${workflowId}/purge`,
+        { method: "DELETE", headers }
+      );
+      if (purgeResponse.ok) {
+        console.log(`Purged existing workflow: ${workflowId}`);
+        // Small delay to ensure purge is processed
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    } catch (purgeError) {
+      // Ignore purge errors - workflow might not exist
+      console.log(`Purge skipped (workflow may not exist): ${purgeError}`);
+    }
+
+    // Step 4: Start workflow via Restate ingress (fire-and-forget with /send)
+    // Only pass the blob URL - Restate never sees the large file
     const response = await fetch(
       `${RESTATE_INGRESS_URL}/KboImport/${workflowId}/run/send`,
       {
