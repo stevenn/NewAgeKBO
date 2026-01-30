@@ -5,7 +5,7 @@
  * Uses staging tables and batch tracking for resumable, progress-trackable imports.
  *
  * Key functions:
- * - prepareImport(): Parse ZIP, populate staging tables, create batches
+ * - prepareImport(): Parse ZIP, populate staging tables, create batches (RESUMABLE)
  * - processBatch(): Execute single batch (delete or insert)
  * - getImportProgress(): Query batch status
  * - finalizeImport(): Resolve names, cleanup staging data
@@ -13,7 +13,7 @@
 
 import StreamZip from 'node-stream-zip'
 import { parse } from 'csv-parse/sync'
-import { randomUUID } from 'crypto'
+import { createHash } from 'crypto'
 import type { DuckDBConnection } from '@duckdb/node-api'
 import { connectMotherduck, closeMotherduck, executeQuery, executeStatement } from '../motherduck'
 import {
@@ -34,15 +34,21 @@ import { downloadFromBlob } from '../blob'
 // ============================================================================
 
 /**
- * Batch size configuration per table
+ * Chunk size for staging table inserts (records per INSERT statement)
+ * Smaller chunks = more resumable, but more overhead
+ */
+const STAGING_CHUNK_SIZE = 5000
+
+/**
+ * Batch size configuration per table (for processing batches, not staging)
  * Conservative sizes for large tables, larger for smaller tables
  */
 const BATCH_SIZES: Record<string, number> = {
-  activities: 1000,     // Increased from 500 for large update files
+  activities: 1000,
   addresses: 1000,
   contacts: 1000,
   denominations: 1000,
-  enterprises: 2000,    // Smaller table, larger batches ok
+  enterprises: 2000,
   establishments: 2000,
   branches: 1000,
 }
@@ -142,6 +148,17 @@ interface MetaRecord {
 // ============================================================================
 
 /**
+ * Generate deterministic job ID from workflow ID
+ * This ensures the same workflow always uses the same job ID for resumability
+ */
+function generateJobId(workflowId: string): string {
+  // Create a deterministic UUID-like string from workflow ID
+  const hash = createHash('sha256').update(workflowId).digest('hex')
+  // Format as UUID: 8-4-4-4-12
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-${hash.slice(12, 16)}-${hash.slice(16, 20)}-${hash.slice(20, 32)}`
+}
+
+/**
  * Parse metadata from meta.csv in ZIP
  */
 async function parseMetadata(zip: StreamZip.StreamZipAsync): Promise<RawMetadata> {
@@ -210,76 +227,119 @@ function calculateBatchCount(recordCount: number, batchSize: number): number {
 }
 
 /**
- * Populate a staging table with CSV records, assigning batch numbers and row sequence
- *
- * row_sequence tracks the original CSV row order (1-based) so that when duplicates
- * exist in the CSV, we can use the last occurrence (highest row_sequence) as the
- * authoritative record during INSERT operations.
+ * Get the maximum row_sequence already inserted for a job/table/operation
+ * Returns 0 if no records exist
  */
-async function populateStagingTable(
+async function getMaxRowSequence(
   db: DuckDBConnection,
   stagingTableName: string,
-  _dbTableName: string,
-  records: Record<string, string>[],
-  operation: 'delete' | 'insert',
   jobId: string,
-  batchSize: number,
-  _metadata: Metadata
-): Promise<void> {
-  if (records.length === 0) return
-
-  const csvColumns = Object.keys(records[0])
-  const dbColumns = csvColumns.map(col => csvColumnToDbColumn(col))
-
-  // Build column list for staging table
-  // Order: job_id, batch_number, operation, row_sequence, ...data columns
-  // processed=false and created_at=now are defaults
-  const stagingColumns = ['job_id', 'batch_number', 'operation', 'row_sequence', ...dbColumns]
-
-  // Build VALUES for all records
-  const values: string[] = []
-
-  for (let i = 0; i < records.length; i++) {
-    const record = records[i]
-    const batchNumber = Math.floor(i / batchSize) + 1
-    const rowSequence = i + 1  // 1-based row sequence from CSV
-
-    const recordValues = csvColumns.map(col => {
-      const val = record[col]
-      if (val === '' || val === null || val === undefined) {
-        return 'NULL'
-      }
-
-      // Check if this looks like a date (DD-MM-YYYY format)
-      if (col.toLowerCase().includes('date') && isKboDateFormat(val)) {
-        const converted = convertKboDateFormat(val)
-        return `'${converted}'`
-      }
-
-      // SECURITY: Escape single quotes for SQL string literals
-      return `'${val.replace(/'/g, "''")}'`
-    })
-
-    values.push(`('${jobId}', ${batchNumber}, '${operation}', ${rowSequence}, ${recordValues.join(', ')})`)
-  }
-
-  const sql = `
-    INSERT INTO ${stagingTableName} (${stagingColumns.join(', ')})
-    VALUES
-      ${values.join(',\n      ')}
-  `
-
-  // Debug: log first value to check structure
-  if (values.length > 0) {
-    console.log(`   DEBUG - Columns: ${stagingColumns.join(', ')}`)
-    console.log(`   DEBUG - First value: ${values[0]}`)
-  }
-
-  await executeStatement(db, sql)
+  operation: 'delete' | 'insert'
+): Promise<number> {
+  const result = await executeQuery<{ max_seq: number | null }>(db, `
+    SELECT MAX(row_sequence) as max_seq
+    FROM ${stagingTableName}
+    WHERE job_id = '${jobId}'
+      AND operation = '${operation}'
+  `)
+  return Number(result[0]?.max_seq || 0)
 }
 
 /**
- * Create batch tracking records in import_job_batches
+ * Populate a staging table with CSV records in chunks (RESUMABLE)
+ *
+ * - Inserts in chunks of STAGING_CHUNK_SIZE records
+ * - Checks existing progress and skips already-inserted records
+ * - Each chunk is committed separately for resumability
+ */
+async function populateStagingTableChunked(
+  db: DuckDBConnection,
+  stagingTableName: string,
+  dbTableName: string,
+  records: Record<string, string>[],
+  operation: 'delete' | 'insert',
+  jobId: string,
+  batchSize: number
+): Promise<{ inserted: number; skipped: number }> {
+  if (records.length === 0) return { inserted: 0, skipped: 0 }
+
+  // Check existing progress
+  const maxRowSeq = await getMaxRowSequence(db, stagingTableName, jobId, operation)
+  const alreadyInserted = maxRowSeq > 0
+
+  if (alreadyInserted) {
+    console.log(`   ↪ Resuming ${dbTableName} ${operation}: ${maxRowSeq} records already staged`)
+  }
+
+  const csvColumns = Object.keys(records[0])
+  const dbColumns = csvColumns.map(col => csvColumnToDbColumn(col))
+  const stagingColumns = ['job_id', 'batch_number', 'operation', 'row_sequence', ...dbColumns]
+
+  let insertedCount = 0
+  let skippedCount = 0
+
+  // Process in chunks
+  for (let chunkStart = 0; chunkStart < records.length; chunkStart += STAGING_CHUNK_SIZE) {
+    const chunkEnd = Math.min(chunkStart + STAGING_CHUNK_SIZE, records.length)
+    const chunkRecords = records.slice(chunkStart, chunkEnd)
+
+    // Build VALUES for this chunk, skipping already-inserted records
+    const values: string[] = []
+
+    for (let i = 0; i < chunkRecords.length; i++) {
+      const globalIndex = chunkStart + i
+      const rowSequence = globalIndex + 1 // 1-based row sequence from CSV
+
+      // Skip if already inserted
+      if (rowSequence <= maxRowSeq) {
+        skippedCount++
+        continue
+      }
+
+      const record = chunkRecords[i]
+      const batchNumber = Math.floor(globalIndex / batchSize) + 1
+
+      const recordValues = csvColumns.map(col => {
+        const val = record[col]
+        if (val === '' || val === null || val === undefined) {
+          return 'NULL'
+        }
+
+        // Check if this looks like a date (DD-MM-YYYY format)
+        if (col.toLowerCase().includes('date') && isKboDateFormat(val)) {
+          const converted = convertKboDateFormat(val)
+          return `'${converted}'`
+        }
+
+        // SECURITY: Escape single quotes for SQL string literals
+        return `'${val.replace(/'/g, "''")}'`
+      })
+
+      values.push(`('${jobId}', ${batchNumber}, '${operation}', ${rowSequence}, ${recordValues.join(', ')})`)
+    }
+
+    // Insert this chunk if there are values
+    if (values.length > 0) {
+      const sql = `
+        INSERT INTO ${stagingTableName} (${stagingColumns.join(', ')})
+        VALUES
+          ${values.join(',\n          ')}
+      `
+
+      await executeStatement(db, sql)
+      insertedCount += values.length
+
+      // Log progress every chunk
+      const totalProgress = Math.min(chunkEnd, records.length)
+      console.log(`   ↪ ${dbTableName} ${operation}: ${totalProgress}/${records.length} records staged`)
+    }
+  }
+
+  return { inserted: insertedCount, skipped: skippedCount }
+}
+
+/**
+ * Create batch tracking records in import_job_batches (idempotent)
  */
 async function createBatchRecords(
   db: DuckDBConnection,
@@ -290,6 +350,20 @@ async function createBatchRecords(
   totalRecords: number
 ): Promise<void> {
   if (batchCount === 0) return
+
+  // Check if batch records already exist
+  const existing = await executeQuery<{ count: number }>(db, `
+    SELECT COUNT(*) as count
+    FROM import_job_batches
+    WHERE job_id = '${jobId}'
+      AND table_name = '${tableName}'
+      AND operation = '${operation}'
+  `)
+
+  if (Number(existing[0]?.count || 0) > 0) {
+    console.log(`   ↪ Batch records for ${tableName} ${operation} already exist, skipping`)
+    return
+  }
 
   const recordsPerBatch = Math.ceil(totalRecords / batchCount)
   const values: string[] = []
@@ -321,18 +395,23 @@ async function createBatchRecords(
 // ============================================================================
 
 /**
- * Step 1: Prepare Import
+ * Step 1: Prepare Import (RESUMABLE)
  *
  * Downloads from blob URL, extracts and parses the ZIP file, populates staging
  * tables with data, creates batch records for processing, and returns job metadata.
  *
+ * This function is IDEMPOTENT - it can be called multiple times and will resume
+ * from where it left off. Uses deterministic job ID based on workflow ID.
+ *
  * @param zipSource - Vercel Blob URL to download the ZIP file from
  * @param workerType - Type of worker (local, vercel, etc.)
+ * @param workflowId - Restate workflow ID for deterministic job ID generation
  * @returns Job ID and batch information
  */
 export async function prepareImport(
   zipSource: string,
-  workerType: WorkerType = 'local'
+  workerType: WorkerType = 'local',
+  workflowId?: string
 ): Promise<PrepareImportResult> {
   // Download from blob URL
   console.log(`Downloading ZIP from blob: ${zipSource}`)
@@ -340,13 +419,12 @@ export async function prepareImport(
   console.log(`Downloaded ${zipBuffer.length} bytes from blob`)
 
   // Write buffer to temporary file (node-stream-zip requires a file path)
-  const tempFilePath = join(tmpdir(), `kbo-update-${randomUUID()}.zip`)
+  const tempFilePath = join(tmpdir(), `kbo-update-${Date.now()}.zip`)
   writeFileSync(tempFilePath, zipBuffer)
 
   let zip: StreamZip.StreamZipAsync | null = null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let db: any = null
-  const jobId = randomUUID()
 
   try {
     zip = new StreamZip.async({ file: tempFilePath })
@@ -364,26 +442,39 @@ export async function prepareImport(
       throw new Error(`Expected 'update' extract type, got '${metadata.extractType}'`)
     }
 
-    // Step 2: Create import job record
-    console.log('\n📝 Creating import job record...')
-    const jobStartTime = new Date().toISOString()
-
-    await executeStatement(db, `
-      INSERT INTO import_jobs (
-        id, extract_number, extract_type, snapshot_date, extract_timestamp,
-        status, started_at, worker_type
-      ) VALUES (
-        '${jobId}',
-        ${metadata.extractNumber},
-        'update',
-        '${metadata.snapshotDate}',
-        '${metadata.extractTimestamp}',
-        'pending',
-        '${jobStartTime}',
-        '${workerType}'
-      )
-    `)
+    // Generate deterministic job ID from workflow ID (or fall back to extract number)
+    const effectiveWorkflowId = workflowId || `import-${metadata.extractNumber}`
+    const jobId = generateJobId(effectiveWorkflowId)
+    console.log(`   ✓ Workflow ID: ${effectiveWorkflowId}`)
     console.log(`   ✓ Job ID: ${jobId}`)
+
+    // Step 2: Create or resume import job record
+    const existingJob = await executeQuery<{ id: string; status: string }>(db, `
+      SELECT id, status FROM import_jobs WHERE id = '${jobId}'
+    `)
+
+    if (existingJob.length > 0) {
+      console.log(`\n📝 Resuming existing import job (status: ${existingJob[0].status})...`)
+    } else {
+      console.log('\n📝 Creating new import job record...')
+      const jobStartTime = new Date().toISOString()
+
+      await executeStatement(db, `
+        INSERT INTO import_jobs (
+          id, extract_number, extract_type, snapshot_date, extract_timestamp,
+          status, started_at, worker_type
+        ) VALUES (
+          '${jobId}',
+          ${metadata.extractNumber},
+          'update',
+          '${metadata.snapshotDate}',
+          '${metadata.extractTimestamp}',
+          'pending',
+          '${jobStartTime}',
+          '${workerType}'
+        )
+      `)
+    }
 
     // Step 3: Get list of tables to process
     const entries = await zip.entries()
@@ -399,7 +490,7 @@ export async function prepareImport(
     const tableList = Array.from(tables).sort()
     console.log(`\n📊 Tables to process: ${tableList.join(', ')}\n`)
 
-    // Step 4: Process each table and populate staging
+    // Step 4: Process each table and populate staging (RESUMABLE)
     const batchesByTable: Record<string, { delete: number; insert: number }> = {}
     let totalBatches = 0
 
@@ -426,14 +517,14 @@ export async function prepareImport(
           batchesByTable[dbTableName].delete = batchCount
           totalBatches += batchCount
 
-          await populateStagingTable(
+          const { inserted, skipped } = await populateStagingTableChunked(
             db, stagingTableName, dbTableName, deleteRecords,
-            'delete', jobId, batchSize, metadata
+            'delete', jobId, batchSize
           )
 
           await createBatchRecords(db, jobId, dbTableName, 'delete', batchCount, deleteRecords.length)
 
-          console.log(`   ✓ Delete: ${deleteRecords.length} records → ${batchCount} batches`)
+          console.log(`   ✓ Delete: ${deleteRecords.length} records → ${batchCount} batches (inserted: ${inserted}, skipped: ${skipped})`)
         }
       } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : ''
@@ -457,14 +548,14 @@ export async function prepareImport(
           batchesByTable[dbTableName].insert = batchCount
           totalBatches += batchCount
 
-          await populateStagingTable(
+          const { inserted, skipped } = await populateStagingTableChunked(
             db, stagingTableName, dbTableName, insertRecords,
-            'insert', jobId, batchSize, metadata
+            'insert', jobId, batchSize
           )
 
           await createBatchRecords(db, jobId, dbTableName, 'insert', batchCount, insertRecords.length)
 
-          console.log(`   ✓ Insert: ${insertRecords.length} records → ${batchCount} batches`)
+          console.log(`   ✓ Insert: ${insertRecords.length} records → ${batchCount} batches (inserted: ${inserted}, skipped: ${skipped})`)
         }
       } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : ''

@@ -73,11 +73,13 @@ const kboImportWorkflow = restate.workflow({
       try {
         // Step 1: Prepare import (downloads from blob, parses ZIP, creates batches)
         // prepareImport handles the blob download internally
-        ctx.console.log(`Preparing import from blob for ${filename}...`);
+        // Pass workflow ID for deterministic job ID generation (enables resumability)
+        const workflowId = ctx.key;
+        ctx.console.log(`Preparing import from blob for ${filename} (workflow: ${workflowId})...`);
         const prepareResult = await ctx.run(
           "prepare-import",
           async (): Promise<PrepareImportResult> => {
-            return await prepareImport(blobUrl, "vercel");
+            return await prepareImport(blobUrl, "vercel", workflowId);
           }
         );
 
