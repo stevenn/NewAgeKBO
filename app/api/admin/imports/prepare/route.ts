@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { checkAdminAccess } from '@/lib/auth/check-admin'
 import { prepareImport } from '@/lib/import/batched-update'
 import { downloadFile, extractFileMetadata } from '@/lib/kbo-client'
+import { uploadToBlob, deleteFromBlob } from '@/lib/blob'
 import { WorkerType } from '@/lib/types/import-job'
 
 /**
@@ -10,11 +11,14 @@ import { WorkerType } from '@/lib/types/import-job'
  * Prepares a KBO update ZIP file for batched import by downloading from URL.
  * Expects JSON body with 'url' or 'filename' field.
  *
- * Parses the ZIP, populates staging tables, and creates batch tracking records.
+ * Downloads from KBO portal, uploads to Vercel Blob, then calls prepareImport
+ * which downloads from blob to process.
  *
  * Response: PrepareImportResult with job_id and batch counts
  */
 export async function POST(request: NextRequest) {
+  let blobUrl: string | null = null
+
   try {
     // Check authentication and admin role
     const authError = await checkAdminAccess()
@@ -72,22 +76,43 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Validate file size (max 100MB)
-    if (buffer.length > 100 * 1024 * 1024) {
+    // Validate file size (max 150MB)
+    if (buffer.length > 150 * 1024 * 1024) {
       return NextResponse.json(
-        { error: 'File too large (max 100MB)' },
+        { error: 'File too large (max 150MB)' },
         { status: 400 }
       )
     }
 
-    // Prepare the import
+    // Upload to Vercel Blob (prepareImport will download from there)
+    const workflowId = `prepare-${metadata.extract_number}`
+    console.log(`[API] Uploading to Vercel Blob...`)
+    const blob = await uploadToBlob(buffer, filename, workflowId)
+    blobUrl = blob.url
+    console.log(`   ✓ Uploaded to blob: ${blob.pathname} (${blob.size} bytes)`)
+
+    // Prepare the import (downloads from blob internally)
     console.log(`[API] Preparing batched import: ${filename} (${Math.round(buffer.length / 1024)}KB)`)
-    const result = await prepareImport(buffer, workerType as WorkerType)
+    const result = await prepareImport(blobUrl, workerType as WorkerType)
+
+    // Clean up blob after successful preparation
+    console.log(`[API] Cleaning up blob...`)
+    await deleteFromBlob(blobUrl)
+    console.log(`   ✓ Blob cleaned up`)
 
     return NextResponse.json(result)
 
   } catch (error) {
     console.error('[API] Failed to prepare import:', error)
+
+    // Clean up blob on error
+    if (blobUrl) {
+      try {
+        await deleteFromBlob(blobUrl)
+      } catch (cleanupError) {
+        console.error('[API] Failed to cleanup blob:', cleanupError)
+      }
+    }
 
     if (error instanceof Error) {
       return NextResponse.json(

@@ -27,6 +27,7 @@ import { Metadata } from './metadata'
 import { tmpdir } from 'os'
 import { writeFileSync, unlinkSync } from 'fs'
 import { join } from 'path'
+import { downloadFromBlob } from '../blob'
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -322,17 +323,22 @@ async function createBatchRecords(
 /**
  * Step 1: Prepare Import
  *
- * Extracts and parses the ZIP file, populates staging tables with data,
- * creates batch records for processing, and returns job metadata.
+ * Downloads from blob URL, extracts and parses the ZIP file, populates staging
+ * tables with data, creates batch records for processing, and returns job metadata.
  *
- * @param zipBuffer - Buffer containing the KBO update ZIP file
+ * @param zipSource - Vercel Blob URL to download the ZIP file from
  * @param workerType - Type of worker (local, vercel, etc.)
  * @returns Job ID and batch information
  */
 export async function prepareImport(
-  zipBuffer: Buffer,
+  zipSource: string,
   workerType: WorkerType = 'local'
 ): Promise<PrepareImportResult> {
+  // Download from blob URL
+  console.log(`Downloading ZIP from blob: ${zipSource}`)
+  const zipBuffer = await downloadFromBlob(zipSource)
+  console.log(`Downloaded ${zipBuffer.length} bytes from blob`)
+
   // Write buffer to temporary file (node-stream-zip requires a file path)
   const tempFilePath = join(tmpdir(), `kbo-update-${randomUUID()}.zip`)
   writeFileSync(tempFilePath, zipBuffer)
