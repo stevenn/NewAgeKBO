@@ -31,6 +31,9 @@ export default function WorkflowStatusPage({
   const [progress, setProgress] = useState<WorkflowProgress | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [isStale, setIsStale] = useState(false)
+  const lastProgressRef = React.useRef<string | null>(null)
+  const staleCountRef = React.useRef(0)
 
   const fetchProgress = async () => {
     try {
@@ -39,6 +42,23 @@ export default function WorkflowStatusPage({
 
       if (!response.ok) {
         throw new Error(data.error || 'Failed to fetch progress')
+      }
+
+      // Detect stale workflows (no progress for 10 consecutive polls = 30 seconds)
+      const progressKey = JSON.stringify({
+        status: data.status,
+        completed_batches: data.completed_batches,
+        staging_counts: data.preparation?.staging_counts
+      })
+
+      if (progressKey === lastProgressRef.current) {
+        staleCountRef.current++
+        if (staleCountRef.current >= 10) {
+          setIsStale(true)
+        }
+      } else {
+        staleCountRef.current = 0
+        lastProgressRef.current = progressKey
       }
 
       setProgress(data)
@@ -53,15 +73,15 @@ export default function WorkflowStatusPage({
   useEffect(() => {
     fetchProgress()
 
-    // Poll every 2 seconds while workflow is running
+    // Poll every 3 seconds while workflow is active (not completed, failed, or stale)
     const interval = setInterval(() => {
-      if (progress?.status !== 'completed' && progress?.status !== 'failed') {
+      if (progress?.status !== 'completed' && progress?.status !== 'failed' && !isStale) {
         fetchProgress()
       }
-    }, 2000)
+    }, 3000)
 
     return () => clearInterval(interval)
-  }, [workflowId, progress?.status])
+  }, [workflowId, progress?.status, isStale])
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -220,6 +240,17 @@ export default function WorkflowStatusPage({
               <div className="bg-red-50 border border-red-200 rounded-lg p-4">
                 <p className="text-red-800 font-medium">Error</p>
                 <p className="text-red-700 text-sm mt-1">{progress.error}</p>
+              </div>
+            )}
+
+            {/* Stale Workflow Warning */}
+            {isStale && progress.status !== 'completed' && progress.status !== 'failed' && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                <p className="text-amber-800 font-medium">Workflow appears stuck</p>
+                <p className="text-amber-700 text-sm mt-1">
+                  No progress detected for 30 seconds. The workflow may have failed silently.
+                  Polling has been stopped.
+                </p>
               </div>
             )}
 
