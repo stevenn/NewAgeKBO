@@ -24,14 +24,17 @@ function generateJobId(workflowId: string): string {
 
 /**
  * Query database for preparation progress
+ * @param jobIdOrWorkflowId - Either a job ID (from Restate progress) or workflow ID to generate from
  */
-async function getPreparationProgress(workflowId: string): Promise<{
+async function getPreparationProgress(jobIdOrWorkflowId: string): Promise<{
   job_status?: string;
   staging_counts?: Record<string, number>;
   extract_number?: number;
   snapshot_date?: string;
 } | null> {
-  const jobId = generateJobId(workflowId);
+  // If it looks like a UUID (job ID from Restate), use directly; otherwise generate from workflow ID
+  const isJobId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(jobIdOrWorkflowId);
+  const jobId = isJobId ? jobIdOrWorkflowId : generateJobId(jobIdOrWorkflowId);
   let db = null;
 
   try {
@@ -79,11 +82,23 @@ async function getPreparationProgress(workflowId: string): Promise<{
       }
     }
 
+    // Convert snapshot_date to string (DuckDB returns date objects)
+    let snapshotDateStr: string | undefined;
+    if (job.snapshot_date) {
+      if (typeof job.snapshot_date === 'object' && 'days' in job.snapshot_date) {
+        // Convert days since epoch to date string
+        const date = new Date((job.snapshot_date as { days: number }).days * 24 * 60 * 60 * 1000);
+        snapshotDateStr = date.toISOString().split('T')[0];
+      } else {
+        snapshotDateStr = String(job.snapshot_date);
+      }
+    }
+
     return {
       job_status: job.status,
       staging_counts,
       extract_number: job.extract_number,
-      snapshot_date: job.snapshot_date,
+      snapshot_date: snapshotDateStr,
     };
   } catch (error) {
     console.error("Error querying preparation progress:", error);
@@ -137,8 +152,9 @@ export async function GET(
     const progress = await response.json();
 
     // If in preparing state, enrich with database progress
+    // Use job_id from Restate if available (more reliable), fall back to generating from workflowId
     if (progress.status === "preparing") {
-      const prepProgress = await getPreparationProgress(workflowId);
+      const prepProgress = await getPreparationProgress(progress.job_id || workflowId);
       if (prepProgress) {
         return NextResponse.json({
           workflow_id: workflowId,
