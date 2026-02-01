@@ -67,9 +67,9 @@ export async function GET(request: Request) {
         id: job.id,
         export_type: job.export_type,
         status: job.status,
-        records_exported: job.records_exported,
-        created_at: job.created_at,
-        expires_at: job.expires_at,
+        records_exported: Number(job.records_exported),
+        created_at: String(job.created_at),
+        expires_at: job.expires_at ? String(job.expires_at) : null,
         table_name: job.table_name,
       }))
 
