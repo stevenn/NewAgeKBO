@@ -729,6 +729,7 @@ async function calculateProgress(
 
 function buildEnterpriseInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
   // Use ROW_NUMBER to deduplicate - last row in CSV wins (highest row_sequence)
+  // Use NOT EXISTS to handle Restate retries (Motherduck may not honor ON CONFLICT at commit time)
   return `
     INSERT INTO enterprises (
       enterprise_number, status, juridical_situation, type_of_enterprise,
@@ -752,12 +753,18 @@ function buildEnterpriseInsert(stagingTable: string, jobId: string, batch: numbe
         AND processed = false
     ) deduped
     WHERE rn = 1
-    ON CONFLICT DO NOTHING
+      AND NOT EXISTS (
+        SELECT 1 FROM enterprises e
+        WHERE e.enterprise_number = deduped.enterprise_number
+          AND e._snapshot_date = '${snapshotDate}'::DATE
+          AND e._extract_number = ${extractNumber}
+      )
   `
 }
 
 function buildEstablishmentInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
   // Use ROW_NUMBER to deduplicate - last row in CSV wins (highest row_sequence)
+  // Use NOT EXISTS to handle Restate retries (Motherduck may not honor ON CONFLICT at commit time)
   return `
     INSERT INTO establishments (
       establishment_number, enterprise_number, start_date,
@@ -776,12 +783,18 @@ function buildEstablishmentInsert(stagingTable: string, jobId: string, batch: nu
         AND processed = false
     ) deduped
     WHERE rn = 1
-    ON CONFLICT DO NOTHING
+      AND NOT EXISTS (
+        SELECT 1 FROM establishments est
+        WHERE est.establishment_number = deduped.establishment_number
+          AND est._snapshot_date = '${snapshotDate}'::DATE
+          AND est._extract_number = ${extractNumber}
+      )
   `
 }
 
 function buildBranchInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
   // Use ROW_NUMBER to deduplicate - last row in CSV wins (highest row_sequence)
+  // Use NOT EXISTS to handle Restate retries (Motherduck may not honor ON CONFLICT at commit time)
   return `
     INSERT INTO branches (
       id, enterprise_number, start_date,
@@ -800,29 +813,39 @@ function buildBranchInsert(stagingTable: string, jobId: string, batch: number, s
         AND processed = false
     ) deduped
     WHERE rn = 1
-    ON CONFLICT DO NOTHING
+      AND NOT EXISTS (
+        SELECT 1 FROM branches b
+        WHERE b.id = deduped.id
+          AND b._snapshot_date = '${snapshotDate}'::DATE
+          AND b._extract_number = ${extractNumber}
+      )
   `
 }
 
 function buildActivityInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
   // Use ROW_NUMBER to deduplicate - last row in CSV wins (highest row_sequence)
   // Partition by all columns that form the computed id
+  // Use NOT EXISTS to handle Restate retries (Motherduck may not honor ON CONFLICT at commit time)
   return `
     INSERT INTO activities (
       id, entity_number, entity_type, activity_group, nace_version, nace_code, classification,
       _snapshot_date, _extract_number, _is_current
     )
     SELECT
-      entity_number || '_' || activity_group || '_' || nace_version || '_' || nace_code || '_' || classification as id,
+      computed_id as id,
       entity_number,
-      CASE
-        WHEN SUBSTRING(entity_number, 2, 1) = '.' THEN 'establishment'
-        ELSE 'enterprise'
-      END as entity_type,
+      entity_type,
       activity_group, nace_version, nace_code, classification,
       '${snapshotDate}'::DATE, ${extractNumber}, true
     FROM (
-      SELECT *,
+      SELECT
+        entity_number || '_' || activity_group || '_' || nace_version || '_' || nace_code || '_' || classification as computed_id,
+        entity_number,
+        CASE
+          WHEN SUBSTRING(entity_number, 2, 1) = '.' THEN 'establishment'
+          ELSE 'enterprise'
+        END as entity_type,
+        activity_group, nace_version, nace_code, classification,
         ROW_NUMBER() OVER (
           PARTITION BY entity_number, activity_group, nace_version, nace_code, classification
           ORDER BY row_sequence DESC
@@ -834,13 +857,19 @@ function buildActivityInsert(stagingTable: string, jobId: string, batch: number,
         AND processed = false
     ) deduped
     WHERE rn = 1
-    ON CONFLICT DO NOTHING
+      AND NOT EXISTS (
+        SELECT 1 FROM activities a
+        WHERE a.id = deduped.computed_id
+          AND a._snapshot_date = '${snapshotDate}'::DATE
+          AND a._extract_number = ${extractNumber}
+      )
   `
 }
 
 function buildAddressInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
   // Use ROW_NUMBER to deduplicate - last row in CSV wins (highest row_sequence)
   // Partition by entity_number + type_of_address which form the computed id
+  // Use NOT EXISTS to handle Restate retries (Motherduck may not honor ON CONFLICT at commit time)
   return `
     INSERT INTO addresses (
       id, entity_number, entity_type, type_of_address,
@@ -849,17 +878,22 @@ function buildAddressInsert(stagingTable: string, jobId: string, batch: number, 
       _snapshot_date, _extract_number, _is_current
     )
     SELECT
-      entity_number || '_' || type_of_address as id,
+      computed_id as id,
       entity_number,
-      CASE
-        WHEN SUBSTRING(entity_number, 2, 1) = '.' THEN 'establishment'
-        ELSE 'enterprise'
-      END as entity_type,
+      entity_type,
       type_of_address, country_nl, country_fr, zipcode, municipality_nl, municipality_fr,
       street_nl, street_fr, house_number, box, extra_address_info, date_striking_off,
       '${snapshotDate}'::DATE, ${extractNumber}, true
     FROM (
-      SELECT *,
+      SELECT
+        entity_number || '_' || type_of_address as computed_id,
+        entity_number,
+        CASE
+          WHEN SUBSTRING(entity_number, 2, 1) = '.' THEN 'establishment'
+          ELSE 'enterprise'
+        END as entity_type,
+        type_of_address, country_nl, country_fr, zipcode, municipality_nl, municipality_fr,
+        street_nl, street_fr, house_number, box, extra_address_info, date_striking_off,
         ROW_NUMBER() OVER (
           PARTITION BY entity_number, type_of_address
           ORDER BY row_sequence DESC
@@ -871,29 +905,39 @@ function buildAddressInsert(stagingTable: string, jobId: string, batch: number, 
         AND processed = false
     ) deduped
     WHERE rn = 1
-    ON CONFLICT DO NOTHING
+      AND NOT EXISTS (
+        SELECT 1 FROM addresses addr
+        WHERE addr.id = deduped.computed_id
+          AND addr._snapshot_date = '${snapshotDate}'::DATE
+          AND addr._extract_number = ${extractNumber}
+      )
   `
 }
 
 function buildContactInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
   // Use ROW_NUMBER to deduplicate - last row in CSV wins (highest row_sequence)
   // Partition by all columns that form the computed id (entity_number, entity_contact, contact_type, contact_value)
+  // Use NOT EXISTS to handle Restate retries (Motherduck may not honor ON CONFLICT at commit time)
   return `
     INSERT INTO contacts (
       id, entity_number, entity_type, entity_contact, contact_type, contact_value,
       _snapshot_date, _extract_number, _is_current
     )
     SELECT
-      entity_number || '_' || entity_contact || '_' || contact_type || '_' || SUBSTRING(MD5(contact_value), 1, 8) as id,
+      computed_id as id,
       entity_number,
-      CASE
-        WHEN SUBSTRING(entity_number, 2, 1) = '.' THEN 'establishment'
-        ELSE 'enterprise'
-      END as entity_type,
+      entity_type,
       entity_contact, contact_type, contact_value,
       '${snapshotDate}'::DATE, ${extractNumber}, true
     FROM (
-      SELECT *,
+      SELECT
+        entity_number || '_' || entity_contact || '_' || contact_type || '_' || SUBSTRING(MD5(contact_value), 1, 8) as computed_id,
+        entity_number,
+        CASE
+          WHEN SUBSTRING(entity_number, 2, 1) = '.' THEN 'establishment'
+          ELSE 'enterprise'
+        END as entity_type,
+        entity_contact, contact_type, contact_value,
         ROW_NUMBER() OVER (
           PARTITION BY entity_number, entity_contact, contact_type, contact_value
           ORDER BY row_sequence DESC
@@ -905,29 +949,39 @@ function buildContactInsert(stagingTable: string, jobId: string, batch: number, 
         AND processed = false
     ) deduped
     WHERE rn = 1
-    ON CONFLICT DO NOTHING
+      AND NOT EXISTS (
+        SELECT 1 FROM contacts c
+        WHERE c.id = deduped.computed_id
+          AND c._snapshot_date = '${snapshotDate}'::DATE
+          AND c._extract_number = ${extractNumber}
+      )
   `
 }
 
 function buildDenominationInsert(stagingTable: string, jobId: string, batch: number, snapshotDate: string, extractNumber: number): string {
   // Use ROW_NUMBER to deduplicate - last row in CSV wins (highest row_sequence)
   // Partition by all columns that form the computed id (entity_number, denomination_type, language, denomination)
+  // Use NOT EXISTS to handle Restate retries (Motherduck may not honor ON CONFLICT at commit time)
   return `
     INSERT INTO denominations (
       id, entity_number, entity_type, denomination_type, language, denomination,
       _snapshot_date, _extract_number, _is_current
     )
     SELECT
-      entity_number || '_' || denomination_type || '_' || language || '_' || SUBSTRING(MD5(denomination), 1, 8) as id,
+      computed_id as id,
       entity_number,
-      CASE
-        WHEN SUBSTRING(entity_number, 2, 1) = '.' THEN 'establishment'
-        ELSE 'enterprise'
-      END as entity_type,
+      entity_type,
       denomination_type, language, denomination,
       '${snapshotDate}'::DATE, ${extractNumber}, true
     FROM (
-      SELECT *,
+      SELECT
+        entity_number || '_' || denomination_type || '_' || language || '_' || SUBSTRING(MD5(denomination), 1, 8) as computed_id,
+        entity_number,
+        CASE
+          WHEN SUBSTRING(entity_number, 2, 1) = '.' THEN 'establishment'
+          ELSE 'enterprise'
+        END as entity_type,
+        denomination_type, language, denomination,
         ROW_NUMBER() OVER (
           PARTITION BY entity_number, denomination_type, language, denomination
           ORDER BY row_sequence DESC
@@ -939,7 +993,12 @@ function buildDenominationInsert(stagingTable: string, jobId: string, batch: num
         AND processed = false
     ) deduped
     WHERE rn = 1
-    ON CONFLICT DO NOTHING
+      AND NOT EXISTS (
+        SELECT 1 FROM denominations d
+        WHERE d.id = deduped.computed_id
+          AND d._snapshot_date = '${snapshotDate}'::DATE
+          AND d._extract_number = ${extractNumber}
+      )
   `
 }
 
