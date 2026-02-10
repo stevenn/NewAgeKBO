@@ -3,6 +3,8 @@ import { checkAdminAccess } from '@/lib/auth/check-admin'
 import { connectMotherduck, closeMotherduck, executeQuery } from '@/lib/motherduck'
 import { listDailyUpdates } from '@/lib/kbo-client'
 
+export const dynamic = 'force-dynamic'
+
 /**
  * GET /api/datasets/daily-updates
  * List available daily update files from KBO portal with import status
