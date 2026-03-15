@@ -72,6 +72,7 @@ async function authenticate(): Promise<string> {
       },
       body: formData.toString(),
       redirect: 'manual', // Don't follow redirects automatically
+      cache: 'no-store',
     })
 
     // Collect all Set-Cookie headers
@@ -109,6 +110,7 @@ async function authenticate(): Promise<string> {
       headers: {
         Cookie: cookies,
       },
+      cache: 'no-store',
     })
 
     // Collect any additional cookies from signup
@@ -161,6 +163,7 @@ export async function listAvailableFiles(): Promise<KboDatasetFile[]> {
       headers: {
         Cookie: cookies,
       },
+      cache: 'no-store',
     })
 
     if (!response.ok) {
@@ -238,6 +241,7 @@ export async function downloadFile(url: string): Promise<Buffer> {
       headers: {
         Cookie: cookies,
       },
+      cache: 'no-store',
     })
 
     if (!response.ok) {
@@ -252,6 +256,7 @@ export async function downloadFile(url: string): Promise<Buffer> {
           headers: {
             Cookie: newCookies,
           },
+          cache: 'no-store',
         })
 
         if (!retryResponse.ok) {
