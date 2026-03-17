@@ -145,9 +145,46 @@ async function getSessionCookies(): Promise<string> {
 
   // Authenticate and cache the cookies
   cachedSessionCookies = await authenticate()
-  sessionExpiry = now + 30 * 60 * 1000 // 30 minutes
+  sessionExpiry = now + 5 * 60 * 1000 // 5 minutes (portal sessions expire unpredictably)
 
   return cachedSessionCookies
+}
+
+/**
+ * Parse HTML from the file listing page to extract download links
+ */
+function parseFileListingHtml(html: string): KboDatasetFile[] {
+  const files: KboDatasetFile[] = []
+  const linkRegex = /href="([^"]*KboOpenData[^"]*\.zip)"/gi
+  let match
+
+  while ((match = linkRegex.exec(html)) !== null) {
+    const linkPath = match[1]
+    let url: string
+    if (linkPath.startsWith('http')) {
+      url = linkPath
+    } else if (linkPath.startsWith('/')) {
+      url = `${KBO_BASE_URL}${linkPath}`
+    } else {
+      url = `${KBO_BASE_URL}/affiliation/xml/${linkPath}`
+    }
+
+    const filename = url.split('/').pop() || ''
+    const metadata = parseFilename(filename)
+
+    if (metadata) {
+      files.push({
+        filename,
+        url,
+        extract_number: metadata.extract_number,
+        snapshot_date: metadata.snapshot_date,
+        file_type: metadata.file_type,
+        imported: false,
+      })
+    }
+  }
+
+  return files
 }
 
 /**
@@ -174,40 +211,31 @@ export async function listAvailableFiles(): Promise<KboDatasetFile[]> {
     }
 
     const html = await response.text()
+    const files = parseFileListingHtml(html)
 
-    // Parse HTML to find download links
-    // The page should contain links to ZIP files
-    const files: KboDatasetFile[] = []
-    const linkRegex = /href="([^"]*KboOpenData[^"]*\.zip)"/gi
-    let match
+    // If we got no files and we were using cached cookies, the session may be stale.
+    // Clear session cache and retry once with fresh authentication.
+    if (files.length === 0 && cachedSessionCookies !== null) {
+      console.log('Empty file listing with cached session, retrying with fresh auth...')
+      cachedSessionCookies = null
+      sessionExpiry = 0
+      const freshCookies = await getSessionCookies()
 
-    while ((match = linkRegex.exec(html)) !== null) {
-      const linkPath = match[1]
-      // Convert relative URLs to absolute
-      // Links are in format "files/KboOpenData_..." relative to /affiliation/xml/
-      let url: string
-      if (linkPath.startsWith('http')) {
-        url = linkPath
-      } else if (linkPath.startsWith('/')) {
-        url = `${KBO_BASE_URL}${linkPath}`
-      } else {
-        // Relative path like "files/KboOpenData_..."
-        url = `${KBO_BASE_URL}/affiliation/xml/${linkPath}`
+      const retryResponse = await fetch(FILES_XML_URL, {
+        headers: { Cookie: freshCookies },
+        cache: 'no-store',
+      })
+
+      if (retryResponse.ok) {
+        const retryHtml = await retryResponse.text()
+        const retryFiles = parseFileListingHtml(retryHtml)
+        if (retryFiles.length > 0) {
+          console.log(`✓ Retry succeeded, found ${retryFiles.length} files`)
+          return retryFiles.sort((a, b) => b.extract_number - a.extract_number)
+        }
       }
 
-      const filename = url.split('/').pop() || ''
-      const metadata = parseFilename(filename)
-
-      if (metadata) {
-        files.push({
-          filename,
-          url,
-          extract_number: metadata.extract_number,
-          snapshot_date: metadata.snapshot_date,
-          file_type: metadata.file_type,
-          imported: false, // This will be updated by the API endpoint
-        })
-      }
+      console.warn('File listing is empty even after re-authentication')
     }
 
     return files.sort((a, b) => b.extract_number - a.extract_number)
